@@ -10,7 +10,7 @@ uses
 type
 
   TRouteMethod = (rmUnknown,rmAll,rmGet,rmPost,rmPut,rmDelete,rmOptions,rmHead, rmTrace);
-  TParamIn = (piQuery, piHeader);
+  TParamIn = (piQuery, piHeader, piPath);
 
   TDocContent = record
     ContentType: string;
@@ -55,6 +55,9 @@ type
 
     property Params: TDocReqParamList read FParams;
     function AddParam(AName: string; ATitle: string = ''; Required: Boolean = True; ParamIn: TParamIn = piQuery; ParamType: string = 'string'; ParamDefault: string = ''): THTTPDocRoute;
+    function AddPathParam(AName: string; Required: Boolean = True): THTTPDocRoute;
+    function AddQueryParam(AName: string; Required: Boolean = True): THTTPDocRoute;
+    function AddHeaderParam(AName: string; Required: Boolean = True): THTTPDocRoute;
     function JsonParams: TJSONArray;
 
     property BodyContent: TDocContent read FBodyContent;
@@ -302,6 +305,39 @@ begin
   Result := Self;
 end;
 
+function THTTPDocRoute.AddPathParam(AName: string; Required: Boolean
+  ): THTTPDocRoute;
+begin
+  Result := Self.AddParam(
+    AName,
+    AName,
+    Required,
+    piPath
+  );
+end;
+
+function THTTPDocRoute.AddQueryParam(AName: string; Required: Boolean
+  ): THTTPDocRoute;
+begin
+  Result := Self.AddParam(
+    AName,
+    AName,
+    Required,
+    piQuery
+  );
+end;
+
+function THTTPDocRoute.AddHeaderParam(AName: string; Required: Boolean
+  ): THTTPDocRoute;
+begin
+  Result := Self.AddParam(
+    AName,
+    AName,
+    Required,
+    piHeader
+  );
+end;
+
 function THTTPDocRoute.JsonParams: TJSONArray;
 var
   JsonItem, JsonSchema: TJSONObject;
@@ -316,6 +352,7 @@ begin
     case P.ParamIn of
       piHeader: JsonItem.Add('in', 'header');
       piQuery: JsonItem.Add('in', 'query');
+      piPath: JsonItem.Add('in', 'path');
     end;
     JsonItem.Add('name', P.Name);
     Jsonitem.Add('required', P.Required);
