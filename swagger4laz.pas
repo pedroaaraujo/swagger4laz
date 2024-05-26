@@ -193,34 +193,35 @@ end;
 
 procedure SwaggerUI(AReq: TRequest; AResp: TResponse);
 begin
-  AResp.Contents.Add('<!DOCTYPE html>');
-  AResp.Contents.Add('<html lang="en">');
-  AResp.Contents.Add('  <head>');
-  AResp.Contents.Add('    <meta charset="utf-8" />');
-  AResp.Contents.Add('    <meta name="viewport" content="width=device-width, initial-scale=1" />');
-  AResp.Contents.Add('    <meta name="description" content="SwaggerUI" />');
-  AResp.Contents.Add('    <title>SwaggerUI</title>');
-  AResp.Contents.Add('    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />');
-  AResp.Contents.Add('  </head>');
-  AResp.Contents.Add('  <body>');
-  AResp.Contents.Add('  <div id="swagger-ui"></div>');
-  AResp.Contents.Add('  <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js" crossorigin></script>');
-  AResp.Contents.Add('  <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js" crossorigin></script>');
-  AResp.Contents.Add('  <script>');
-  AResp.Contents.Add('    window.onload = () => {');
-  AResp.Contents.Add('      window.ui = SwaggerUIBundle({');
+  AResp.Contents.Add('    <!DOCTYPE html>');
+  AResp.Contents.Add('    <html>');
+  AResp.Contents.Add('    <head>');
+  AResp.Contents.Add('    <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">');
+  AResp.Contents.Add('    <title>Swagger UI</title>');
+  AResp.Contents.Add('    </head>');
+  AResp.Contents.Add('    <body>');
+  AResp.Contents.Add('    <div id="swagger-ui">');
+  AResp.Contents.Add('    </div>');
+  AResp.Contents.Add('    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>');
+  AResp.Contents.Add('    <!-- `SwaggerUIBundle` is now available on the page -->');
+  AResp.Contents.Add('    <script>');
+  AResp.Contents.Add('    const ui = SwaggerUIBundle({');
   AResp.Contents.Add('        url: ''/openapi.json'',');
-  AResp.Contents.Add('        dom_id: ''#swagger-ui'',');
-  AResp.Contents.Add('        presets: [');
-  AResp.Contents.Add('          SwaggerUIBundle.presets.apis,');
-  AResp.Contents.Add('          SwaggerUIStandalonePreset');
+  AResp.Contents.Add('    "dom_id": "#swagger-ui",');
+  AResp.Contents.Add('"layout": "BaseLayout",');
+  AResp.Contents.Add('"deepLinking": true,');
+  AResp.Contents.Add('"showExtensions": true,');
+  AResp.Contents.Add('"showCommonExtensions": true,');
+  AResp.Contents.Add('oauth2RedirectUrl: window.location.origin + ''/docs/oauth2-redirect'',');
+  AResp.Contents.Add('    presets: [');
+  AResp.Contents.Add('        SwaggerUIBundle.presets.apis,');
+  AResp.Contents.Add('        SwaggerUIBundle.SwaggerUIStandalonePreset');
   AResp.Contents.Add('        ],');
-  AResp.Contents.Add('        layout: "StandaloneLayout",');
-  AResp.Contents.Add('      });');
-  AResp.Contents.Add('    };');
-  AResp.Contents.Add('  </script>');
-  AResp.Contents.Add('  </body>');
-  AResp.Contents.Add('</html>');
+  AResp.Contents.Add('    })');
+  AResp.Contents.Add('    </script>');
+  AResp.Contents.Add('    </body>');
+  AResp.Contents.Add('    </html>');
+
 end;
 
 { THTTPRouterHelper }
@@ -380,7 +381,9 @@ end;
 
 class function TSwaggerRouter.Initialize: TSwaggerRouter;
 begin
-  SwaggerRouter := TSwaggerRouter.Create;
+  if SwaggerRouter = nil then
+    SwaggerRouter := TSwaggerRouter.Create;
+
   Result := SwaggerRouter;
 end;
 
@@ -424,4 +427,3 @@ finalization
   SwaggerRouter.Free;
 
 end.
-
