@@ -30,6 +30,4 @@ Benefícios:
     Precisão: Reduz a chance de erros na documentação, garantindo que esteja sempre atualizada e correta.
     Padronização: Adota o padrão OpenAPI, facilitando a integração com outras ferramentas e melhorando a colaboração entre desenvolvedores.
 
-Contribuição:
-
-Como um projeto open source, o Swagger4Laz está aberto para contribuições da comunidade. Desenvolvedores são bem-vindos para contribuir com melhorias, correções de bugs, novas funcionalidades e sugestões. Para começar a contribuir, visite nosso repositório no GitHub e confira o guia de contribuição.
+Use a força. Leia os fontes.
