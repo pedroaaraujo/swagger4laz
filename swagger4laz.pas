@@ -86,10 +86,14 @@ type
     FTitle: string;
     FVersion: string;
     FDescription: string;
+    FDefaultContentType: string;
+    procedure HTTPRouterBeforeRequest(Sender: TObject; ARequest: TRequest;
+      AResponse: TResponse);
   public
     property Title: string read FTitle;
     property Version: string read FVersion;
     property Description: string read FDescription;
+    property DefaultContentType: string read FDefaultContentType;
 
     class function Initialize: TSwaggerRouter;
 
@@ -98,6 +102,7 @@ type
     function SetTitle(ATitle: string): TSwaggerRouter;
     function SetVersion(AVersion: string): TSwaggerRouter;
     function SetDescription(Text: string): TSwaggerRouter;
+    function SetDefaultContentType(Text: string): TSwaggerRouter;
   end;
 
   var
@@ -224,7 +229,7 @@ begin
   AResp.Contents.Add('    </script>');
   AResp.Contents.Add('    </body>');
   AResp.Contents.Add('    </html>');
-
+  AResp.ContentType :=  'text/html'
 end;
 
 { THTTPRouterHelper }
@@ -416,12 +421,21 @@ end;
 
 { TSwaggerRouter }
 
+procedure TSwaggerRouter.HTTPRouterBeforeRequest(Sender: TObject;
+  ARequest: TRequest; AResponse: TResponse);
+begin
+  AResponse.ContentType:= SwaggerRouter.DefaultContentType;
+end;
+
 class function TSwaggerRouter.Initialize: TSwaggerRouter;
 begin
   if SwaggerRouter = nil then
     SwaggerRouter := TSwaggerRouter.Create;
 
   Result := SwaggerRouter;
+
+  Result.SetDefaultContentType('application/json');
+  HTTPRouter.BeforeRequest:=@HTTPRouterBeforeRequest;
 end;
 
 function TSwaggerRouter.RegisterRoute(const APattern: String;
@@ -456,9 +470,15 @@ begin
   FDescription := Text;
 end;
 
+function TSwaggerRouter.SetDefaultContentType(Text: string): TSwaggerRouter;
+begin
+  FDefaultContentType := Text;
+  Result := Self;
+end;
+
 initialization
-  TSwaggerRouter.Initialize;
   HTTPRouter := httproute.HTTPRouter;
+  TSwaggerRouter.Initialize;
 
 finalization
   SwaggerRouter.Free;
