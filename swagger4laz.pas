@@ -9,12 +9,30 @@ uses
 
 type
 
-  TRouteMethod = (rmUnknown,rmAll,rmGet,rmPost,rmPut,rmDelete,rmOptions,rmHead, rmTrace);
-  TParamIn = (piQuery, piHeader, piPath);
+  TRouteMethod = (
+    rmUnknown,
+    rmAll,
+    rmGet,
+    rmPost,
+    rmPut,
+    rmDelete,
+    rmOptions,
+    rmHead,
+    rmTrace
+  );
+
+  TParamIn = (
+    piQuery,
+    piHeader,
+    piPath,
+    piCookie
+  );
 
   TDocContent = record
     ContentType: string;
     Content: string;
+    Required: Boolean;
+    Description: string;
   end;
 
   TDocResponse = class
@@ -50,7 +68,7 @@ type
     function SetSummary(Text: string): THTTPDocRoute;
 
     property Responses: TResponseList read FResponses;
-    function AddResponse(Code: Integer; ADescription: string; Content: string = ''; ContentType: string = 'application/json'): THTTPDocRoute;
+    function AddResponse(Code: Integer; ADescription: string = ''; Content: string = ''; ContentType: string = 'application/json'): THTTPDocRoute;
     function JsonResponse: TJSONObject;
 
     property Params: TDocReqParamList read FParams;
@@ -61,7 +79,7 @@ type
     function JsonParams: TJSONArray;
 
     property BodyContent: TDocContent read FBodyContent;
-    function SetBodyContent(Content: string; ContentType: string = 'application/json'): THTTPDocRoute;
+    function SetBodyContent(Content: string; Required: Boolean = True; ContentType: string = 'application/json'): THTTPDocRoute;
     function JsonBody: TJSONObject;
 
     property Tags: TStrings read FTags;
@@ -111,6 +129,9 @@ type
 
 implementation
 
+var
+  Buffer: String;
+
 function ReplaceUrlParameter(const Url: string): string;
 var
   RegEx: TRegExpr;
@@ -136,6 +157,14 @@ var
   Route: THTTPDocRoute;
   Method: string;
 begin
+  AResp.ContentType := 'application/json';
+  if not Buffer.IsEmpty then
+  begin
+    AResp.Content := Buffer;
+    AResp.SendContent;
+    Exit;
+  end;
+
   Json := TJSONObject.Create();
   JsonInfo := TJSONObject.Create();
   JsonPaths := TJSONObject.Create();
@@ -172,6 +201,10 @@ begin
         JsonMethod.Add('operationId', '');
         JsonMethod.add('parameters', JsonParams);
         JsonMethod.add('responses', JsonResponse);
+        if not BodyContent.Content.IsEmpty then
+        begin
+          JsonMethod.Add('requestBody', JsonBody);
+        end;
       end;
 
       case TRouteMethod(HTTPRouter.Routes[I].Method) of
@@ -193,7 +226,7 @@ begin
     Json.Add('paths', JsonPaths);
 
     AResp.Content := Json.AsJSON;
-    AResp.ContentType := 'application/json';
+    Buffer := AResp.Content;
   finally
     Json.Free;
   end;
@@ -201,21 +234,21 @@ end;
 
 procedure SwaggerUI(AReq: TRequest; AResp: TResponse);
 begin
-  AResp.Contents.Add('    <!DOCTYPE html>');
-  AResp.Contents.Add('    <html>');
-  AResp.Contents.Add('    <head>');
-  AResp.Contents.Add('    <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">');
-  AResp.Contents.Add('    <title>Swagger UI</title>');
-  AResp.Contents.Add('    </head>');
-  AResp.Contents.Add('    <body>');
-  AResp.Contents.Add('    <div id="swagger-ui">');
-  AResp.Contents.Add('    </div>');
-  AResp.Contents.Add('    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>');
-  AResp.Contents.Add('    <!-- `SwaggerUIBundle` is now available on the page -->');
-  AResp.Contents.Add('    <script>');
-  AResp.Contents.Add('    const ui = SwaggerUIBundle({');
-  AResp.Contents.Add('        url: ''/openapi.json'',');
-  AResp.Contents.Add('    "dom_id": "#swagger-ui",');
+  AResp.Contents.Add('<!DOCTYPE html>');
+  AResp.Contents.Add('<html>');
+  AResp.Contents.Add('<head>');
+  AResp.Contents.Add('  <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">');
+  AResp.Contents.Add('  <title>Swagger UI</title>');
+  AResp.Contents.Add('</head>');
+  AResp.Contents.Add('<body>');
+  AResp.Contents.Add('  <div id="swagger-ui">');
+  AResp.Contents.Add('  </div>');
+  AResp.Contents.Add('  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>');
+  AResp.Contents.Add('  <!-- `SwaggerUIBundle` is now available on the page -->');
+  AResp.Contents.Add('  <script>');
+  AResp.Contents.Add('  const ui = SwaggerUIBundle({');
+  AResp.Contents.Add('      url: ''/openapi.json'',');
+  AResp.Contents.Add('  "dom_id": "#swagger-ui",');
   AResp.Contents.Add('"layout": "BaseLayout",');
   AResp.Contents.Add('"deepLinking": true,');
   AResp.Contents.Add('"showExtensions": true,');
@@ -226,9 +259,9 @@ begin
   AResp.Contents.Add('        SwaggerUIBundle.SwaggerUIStandalonePreset');
   AResp.Contents.Add('        ],');
   AResp.Contents.Add('    })');
-  AResp.Contents.Add('    </script>');
-  AResp.Contents.Add('    </body>');
-  AResp.Contents.Add('    </html>');
+  AResp.Contents.Add('  </script>');
+  AResp.Contents.Add('</body>');
+  AResp.Contents.Add('</html>');
   AResp.ContentType :=  'text/html'
 end;
 
@@ -358,6 +391,7 @@ begin
       piHeader: JsonItem.Add('in', 'header');
       piQuery: JsonItem.Add('in', 'query');
       piPath: JsonItem.Add('in', 'path');
+      piCookie: JsonItem.Add('in', 'cookie');
     end;
     JsonItem.Add('name', P.Name);
     Jsonitem.Add('required', P.Required);
@@ -371,18 +405,27 @@ begin
   end;
 end;
 
-function THTTPDocRoute.SetBodyContent(Content: string; ContentType: string
-  ): THTTPDocRoute;
+function THTTPDocRoute.SetBodyContent(Content: string; Required: Boolean;
+  ContentType: string): THTTPDocRoute;
 begin
   Result := Self;
   FBodyContent.Content := Content;
   FBodyContent.ContentType := ContentType;
+  FBodyContent.Required := Required;
 end;
 
 function THTTPDocRoute.JsonBody: TJSONObject;
+var
+  JBody, JSchema: TJSONObject;
 begin
   Result := TJSONObject.Create();
-
+  JBody := TJSONObject.Create();
+  JSchema := TJSONObject.Create();
+  Result.Add('description', FBodyContent.Description);
+  Result.Add('required', FBodyContent.Required);
+  Result.Add('content', JBody);
+  JBody.Add(FBodyContent.ContentType, JSchema);
+  JSchema.Add('schema', GetJSON(FBodyContent.Content));
 end;
 
 function THTTPDocRoute.AddTags(ADescription: string): THTTPDocRoute;
@@ -435,7 +478,7 @@ begin
   Result := SwaggerRouter;
 
   Result.SetDefaultContentType('application/json');
-  HTTPRouter.BeforeRequest:=@HTTPRouterBeforeRequest;
+  HTTPRouter.BeforeRequest := @HTTPRouterBeforeRequest;
 end;
 
 function TSwaggerRouter.RegisterRoute(const APattern: String;
@@ -479,6 +522,7 @@ end;
 initialization
   HTTPRouter := httproute.HTTPRouter;
   TSwaggerRouter.Initialize;
+  Buffer := EmptyStr;
 
 finalization
   SwaggerRouter.Free;
