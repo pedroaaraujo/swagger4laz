@@ -313,7 +313,7 @@ begin
     begin
       JsonCont := TJSONObject.Create();
       JsonSchema := TJSONObject.Create();
-      JsonSchema.Add('schema', R.DocContent.Content);
+      JsonSchema.Add('schema', GetJson(R.DocContent.Content));
       JsonCont.Add(R.DocContent.ContentType, JsonSchema);
       Item.Add('content', JsonCont);
     end;
