@@ -28,6 +28,14 @@ type
     piCookie
   );
 
+  TSecurityScheme = (
+    ssNone,
+    ssBasic,
+    ssBearer
+  );
+
+  TSecuritySchemes = set of TSecurityScheme;
+
   TDocContent = record
     ContentType: string;
     Content: string;
@@ -60,6 +68,7 @@ type
     FBodyContent: TDocContent;
     FParams: TDocReqParamList;
     FResponses: TResponseList;
+    FSecurity: TSecurityScheme;
     FSummary: string;
     FTags: Tstrings;
 
@@ -82,6 +91,9 @@ type
     function SetBodyContent(Content: string; Required: Boolean = True; ContentType: string = 'application/json'): THTTPDocRoute;
     function JsonBody: TJSONObject;
 
+    property Security: TSecurityScheme read FSecurity;
+    function SetSecurity(Scheme: TSecurityScheme): THTTPDocRoute;
+
     property Tags: TStrings read FTags;
     function AddTags(ADescription: string): THTTPDocRoute;
     function JsonTags: TJSONArray;
@@ -97,10 +109,22 @@ type
     function RegisterDocRoute(Const APattern : String; AMethod : TRouteMethod; ACallBack: TRouteCallBack; IsDefault : Boolean = False): THTTPDocRoute;
   end;
 
+  { TSwaggerComponents }
+
+  TSwaggerComponents = class
+  private
+    FSecuritySchemes: TSecuritySchemes;
+  public
+    property SecuritySchemes: TSecuritySchemes read FSecuritySchemes write FSecuritySchemes;
+
+    function ToJson: TJSONObject;
+  end;
+
   { TSwaggerRouter }
 
   TSwaggerRouter = class
   private
+    FComponents: TSwaggerComponents;
     FTitle: string;
     FVersion: string;
     FDescription: string;
@@ -112,6 +136,7 @@ type
     property Version: string read FVersion;
     property Description: string read FDescription;
     property DefaultContentType: string read FDefaultContentType;
+    property Components: TSwaggerComponents read FComponents;
 
     class function Initialize: TSwaggerRouter;
 
@@ -121,6 +146,9 @@ type
     function SetVersion(AVersion: string): TSwaggerRouter;
     function SetDescription(Text: string): TSwaggerRouter;
     function SetDefaultContentType(Text: string): TSwaggerRouter;
+
+    constructor Create;
+    destructor Destroy; override;
   end;
 
   var
@@ -205,6 +233,11 @@ begin
         begin
           JsonMethod.Add('requestBody', JsonBody);
         end;
+
+        case Route.Security of
+          ssBasic: JsonMethod.Add('security', GetJSON('[{"BasicAuth": []}]'));
+          ssBearer: JsonMethod.Add('security',GetJSON('[{"BearerAuth": []}]'));
+        end;
       end;
 
       case TRouteMethod(HTTPRouter.Routes[I].Method) of
@@ -220,10 +253,12 @@ begin
       else
         Method := 'get';
       end;
+
       JsonURI.Add(Method, JsonMethod);
     end;
 
     Json.Add('paths', JsonPaths);
+    Json.Add('components', SwaggerRouter.Components.ToJson);
 
     AResp.Content := Json.AsJSON;
     Buffer := AResp.Content;
@@ -274,6 +309,46 @@ begin
   Result := CreateHTTPRoute(THTTPDocRoute, APattern, httproute.TRouteMethod(AMethod), IsDefault) as THTTPDocRoute;
   Result.Initialize;
   THTTPRouteCallback(Result).CallBack := ACallBack;
+end;
+
+{ TSwaggerComponents }
+
+function TSwaggerComponents.ToJson: TJSONObject;
+var
+  Security: TJSONObject;
+begin
+  Result := TJSONObject.Create;
+  if SecuritySchemes <> [] then
+  begin
+    Security := TJSONObject.Create;
+    Result.Add('securitySchemes', Security);
+    if ssBasic in SecuritySchemes then
+    begin
+      Security.Add(
+        'BasicAuth',
+        GetJson(
+          '{ ' +
+          '  "type": "http", ' +
+          '  "scheme": "basic" ' +
+          '}'
+        )
+      );
+    end;
+
+    if ssBearer in SecuritySchemes then
+    begin
+      Security.Add(
+        'BearerAuth',
+        GetJson(
+          '{ ' +
+          '"type": "http", ' +
+          '"scheme": "bearer", ' +
+          '"bearerFormat": "JWT" ' +
+          '}'
+        )
+      );
+    end;
+  end;
 end;
 
 { THTTPDocRoute }
@@ -428,6 +503,19 @@ begin
   JSchema.Add('schema', GetJSON(FBodyContent.Content));
 end;
 
+function THTTPDocRoute.SetSecurity(Scheme: TSecurityScheme): THTTPDocRoute;
+begin
+  Result := Self;
+  FSecurity := Scheme;
+
+  if not (Scheme in SwaggerRouter.Components.SecuritySchemes) then
+  begin
+    SwaggerRouter.Components.SecuritySchemes :=
+      SwaggerRouter.Components.SecuritySchemes +
+      [Scheme]
+  end;
+end;
+
 function THTTPDocRoute.AddTags(ADescription: string): THTTPDocRoute;
 begin
   FTags.Add(ADescription);
@@ -451,6 +539,7 @@ begin
   FResponses := TResponseList.Create;
   FTags := TStringList.Create;
   FParams := TDocReqParamList.Create;
+  FSecurity := ssNone;
 end;
 
 destructor THTTPDocRoute.Destroy;
@@ -517,6 +606,17 @@ function TSwaggerRouter.SetDefaultContentType(Text: string): TSwaggerRouter;
 begin
   FDefaultContentType := Text;
   Result := Self;
+end;
+
+constructor TSwaggerRouter.Create;
+begin
+  FComponents := TSwaggerComponents.Create;
+end;
+
+destructor TSwaggerRouter.Destroy;
+begin
+  FComponents.Free;
+  inherited Destroy;
 end;
 
 initialization
