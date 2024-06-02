@@ -184,6 +184,8 @@ var
   Pattern: string;
   Route: THTTPDocRoute;
   Method: string;
+  SL: TStringList;
+  Str: string;
 begin
   AResp.ContentType := 'application/json';
   if not Buffer.IsEmpty then
@@ -196,6 +198,7 @@ begin
   Json := TJSONObject.Create();
   JsonInfo := TJSONObject.Create();
   JsonPaths := TJSONObject.Create();
+  SL := TStringList.Create;
   try
     Json.Add('openapi', '3.1.0');
 
@@ -213,6 +216,15 @@ begin
       end;
 
       Route := HTTPRouter.Routes[I] as THTTPDocRoute;
+      SL.Add(Route.Tags.DelimitedText + '##' + I.ToString);
+    end;
+
+    SL.Sort;
+    for I := 0 to Pred(SL.Count) do
+    begin
+      Str := SL.Strings[I];
+      Str := Copy(Str, Pos('##', Str) + 2, Str.Length);
+      Route := HTTPRouter.Routes[Str.ToInteger] as THTTPDocRoute;
       Pattern := '/' + ReplaceUrlParameter(Route.URLPattern);
       JsonURI := JsonPaths.Find(Pattern) as TJSONObject;
       if JsonURI = nil then
@@ -240,7 +252,7 @@ begin
         end;
       end;
 
-      case TRouteMethod(HTTPRouter.Routes[I].Method) of
+      case TRouteMethod(Route.Method) of
         rmUnknown: Method := 'unknown';
         rmAll:     Method := 'all';
         rmGet:     Method := 'get';
@@ -264,6 +276,7 @@ begin
     Buffer := AResp.Content;
   finally
     Json.Free;
+    SL.Free;
   end;
 end;
 
