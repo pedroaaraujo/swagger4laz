@@ -129,6 +129,8 @@ type
     FVersion: string;
     FDescription: string;
     FDefaultContentType: string;
+    procedure HTTPRouterAfterRequest(Sender: TObject; ARequest: TRequest;
+      AResponse: TResponse);
     procedure HTTPRouterBeforeRequest(Sender: TObject; ARequest: TRequest;
       AResponse: TResponse);
   public
@@ -272,8 +274,8 @@ begin
     Json.Add('paths', JsonPaths);
     Json.Add('components', SwaggerRouter.Components.ToJson);
 
-    AResp.Content := Json.AsJSON;
-    Buffer := AResp.Content;
+    AResp.Contents.Text := Json.AsJSON;
+    Buffer := AResp.Contents.Text;
   finally
     Json.Free;
     SL.Free;
@@ -569,7 +571,13 @@ end;
 procedure TSwaggerRouter.HTTPRouterBeforeRequest(Sender: TObject;
   ARequest: TRequest; AResponse: TResponse);
 begin
-  AResponse.ContentType:= SwaggerRouter.DefaultContentType;
+  AResponse.ContentType := SwaggerRouter.DefaultContentType;
+end;
+
+procedure TSwaggerRouter.HTTPRouterAfterRequest(Sender: TObject;
+  ARequest: TRequest; AResponse: TResponse);
+begin
+
 end;
 
 class function TSwaggerRouter.Initialize: TSwaggerRouter;
@@ -581,6 +589,7 @@ begin
 
   Result.SetDefaultContentType('application/json');
   HTTPRouter.BeforeRequest := @HTTPRouterBeforeRequest;
+  HTTPRouter.AfterRequest := @HTTPRouterAfterRequest;
 end;
 
 function TSwaggerRouter.RegisterRoute(const APattern: String;
