@@ -301,6 +301,8 @@ begin
   AResp.Contents.Add('  "dom_id": "#swagger-ui",');
   AResp.Contents.Add('"layout": "BaseLayout",');
   AResp.Contents.Add('"deepLinking": true,');
+  AResp.Contents.Add('"displayRequestDuration": true,');
+  AResp.Contents.Add('"docExpansion": "none",');
   AResp.Contents.Add('"showExtensions": true,');
   AResp.Contents.Add('"showCommonExtensions": true,');
   AResp.Contents.Add('oauth2RedirectUrl: window.location.origin + ''/docs/oauth2-redirect'',');
