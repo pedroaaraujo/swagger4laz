@@ -36,6 +36,21 @@ type
 
   TSecuritySchemes = set of TSecurityScheme;
 
+  { TSwaggerComponents }
+  TSwaggerComponents = class
+  private
+    FSecuritySchemes: TSecuritySchemes;
+    FModels: TJSONObject;
+  public
+    property SecuritySchemes: TSecuritySchemes read FSecuritySchemes write FSecuritySchemes;
+    property Models: TJSONObject read FModels;
+
+    constructor Create;
+    destructor Destroy; override;
+
+    function ToJson: TJSONObject;
+  end;
+
   TDocContent = record
     ContentType: string;
     Content: string;
@@ -44,7 +59,7 @@ type
   end;
 
   TDocResponse = class
-    Code: Integer;
+    Code: string;
     Description: string;
     DocContent: TDocContent;
   end;
@@ -77,7 +92,8 @@ type
     function SetSummary(Text: string): THTTPDocRoute;
 
     property Responses: TResponseList read FResponses;
-    function AddResponse(Code: Integer; ADescription: string = ''; Content: string = ''; ContentType: string = 'application/json'): THTTPDocRoute;
+    function AddResponse(Code: Integer; ADescription: string = ''; Content: string = ''; ContentType: string = 'application/json'): THTTPDocRoute; overload;
+    function AddResponse(Code: string; ADescription: string = ''; Content: string = ''; ContentType: string = 'application/json'): THTTPDocRoute; overload;
     function JsonResponse: TJSONObject;
 
     property Params: TDocReqParamList read FParams;
@@ -109,17 +125,6 @@ type
     function RegisterDocRoute(Const APattern : String; AMethod : TRouteMethod; ACallBack: TRouteCallBack; IsDefault : Boolean = False): THTTPDocRoute;
   end;
 
-  { TSwaggerComponents }
-
-  TSwaggerComponents = class
-  private
-    FSecuritySchemes: TSecuritySchemes;
-  public
-    property SecuritySchemes: TSecuritySchemes read FSecuritySchemes write FSecuritySchemes;
-
-    function ToJson: TJSONObject;
-  end;
-
   { TSwaggerRouter }
 
   TSwaggerRouter = class
@@ -143,6 +148,9 @@ type
     class function Initialize: TSwaggerRouter;
 
     function RegisterRoute(Const APattern : String; AMethod : TRouteMethod; ACallBack: TRouteCallBack; IsDefault : Boolean = False): THTTPDocRoute;
+    function RegisterModel(AName: string; AModel: TJSONData): TSwaggerRouter;
+      overload;
+    function RegisterModel(AName: string; AModel: string): TSwaggerRouter; overload;
     function SetDocRoute(Endpoint: string): TSwaggerRouter;
     function SetTitle(ATitle: string): TSwaggerRouter;
     function SetVersion(AVersion: string): TSwaggerRouter;
@@ -330,6 +338,18 @@ end;
 
 { TSwaggerComponents }
 
+constructor TSwaggerComponents.Create;
+begin
+  inherited Create;
+  FModels := TJSONObject.Create;
+end;
+
+destructor TSwaggerComponents.Destroy;
+begin
+  FModels.Free;
+  inherited Destroy;
+end;
+
 function TSwaggerComponents.ToJson: TJSONObject;
 var
   Security: TJSONObject;
@@ -366,6 +386,11 @@ begin
       );
     end;
   end;
+
+  if FModels.Count > 0 then
+  begin
+    Result.Add('schemas', FModels);
+  end;
 end;
 
 { THTTPDocRoute }
@@ -377,6 +402,17 @@ begin
 end;
 
 function THTTPDocRoute.AddResponse(Code: Integer; ADescription: string;
+  Content: string; ContentType: string): THTTPDocRoute;
+begin
+  Result := Self.AddResponse(
+    Code.ToString,
+    ADescription,
+    Content,
+    ContentType
+  );
+end;
+
+function THTTPDocRoute.AddResponse(Code: string; ADescription: string;
   Content: string; ContentType: string): THTTPDocRoute;
 var
   Response: TDocResponse;
@@ -394,6 +430,7 @@ function THTTPDocRoute.JsonResponse: TJSONObject;
 var
   R: TDocResponse;
   Item, JsonCont, JsonSchema: TJSONObject;
+  Schema: TJSONData;
 begin
   Result := TJSONObject.Create;
   for R in Responses do
@@ -405,14 +442,23 @@ begin
     begin
       JsonCont := TJSONObject.Create();
       JsonSchema := TJSONObject.Create();
-      JsonSchema.Add('schema', GetJson(R.DocContent.Content));
+      try
+        Schema := GetJson(R.DocContent.Content);
+        JsonSchema.Add('schema', Schema);
+      except
+        on E: Exception do
+        begin
+          JsonSchema.Add('schema', GetJson('{"$ref": "#/components/schemas/' + R.DocContent.Content + '"}'));
+        end;
+      end;
       JsonCont.Add(R.DocContent.ContentType, JsonSchema);
       Item.Add('content', JsonCont);
     end;
 
-    Result.Add(R.Code.ToString, Item);
+    Result.Add(R.Code, Item);
   end;
 end;
+
 
 function THTTPDocRoute.AddParam(AName: string; ATitle: string;
   Required: Boolean; ParamIn: TParamIn; ParamType: string; ParamDefault: string
@@ -531,6 +577,22 @@ begin
       SwaggerRouter.Components.SecuritySchemes +
       [Scheme]
   end;
+end;
+
+function TSwaggerRouter.RegisterModel(AName: string; AModel: TJSONData
+  ): TSwaggerRouter;
+begin
+  Result := Self;
+  FComponents.Models.Add(AName, AModel);
+end;
+
+function TSwaggerRouter.RegisterModel(AName: string; AModel: string
+  ): TSwaggerRouter;
+var
+  Json: TJSONData;
+begin
+  Json := GetJSON(AModel, False);
+  Result := Self.RegisterModel(AName, Json);
 end;
 
 function THTTPDocRoute.AddTags(ADescription: string): THTTPDocRoute;
