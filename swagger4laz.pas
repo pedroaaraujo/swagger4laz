@@ -226,7 +226,7 @@ begin
       end;
 
       Route := HTTPRouter.Routes[I] as THTTPDocRoute;
-      SL.Add(Route.Tags.DelimitedText + '##' + I.ToString);
+      SL.Add(Route.Tags.Text + '##' + I.ToString);
     end;
 
     SL.Sort;
