@@ -98,9 +98,9 @@ type
 
     property Params: TDocReqParamList read FParams;
     function AddParam(AName: string; ATitle: string = ''; Required: Boolean = True; ParamIn: TParamIn = piQuery; ParamType: string = 'string'; ParamDefault: string = ''): THTTPDocRoute;
-    function AddPathParam(AName: string; Required: Boolean = True): THTTPDocRoute;
-    function AddQueryParam(AName: string; Required: Boolean = True): THTTPDocRoute;
-    function AddHeaderParam(AName: string; Required: Boolean = True): THTTPDocRoute;
+    function AddPathParam(AName: string; Required: Boolean = True; ParamType: string = 'string'; DefaultValue: string = ''): THTTPDocRoute;
+    function AddQueryParam(AName: string; Required: Boolean = False; ParamType: string = 'string'; DefaultValue: string = ''): THTTPDocRoute;
+    function AddHeaderParam(AName: string; Required: Boolean = False; ParamType: string = 'string'; DefaultValue: string = ''): THTTPDocRoute;
     function JsonParams: TJSONArray;
 
     property BodyContent: TDocContent read FBodyContent;
@@ -226,7 +226,7 @@ begin
       end;
 
       Route := HTTPRouter.Routes[I] as THTTPDocRoute;
-      SL.Add(Route.Tags.Text + '##' + I.ToString);
+      SL.Add(Route.Tags.DelimitedText + '##' + I.ToString);
     end;
 
     SL.Sort;
@@ -309,7 +309,7 @@ begin
   AResp.Contents.Add('  "dom_id": "#swagger-ui",');
   AResp.Contents.Add('"layout": "BaseLayout",');
   AResp.Contents.Add('"deepLinking": true,');
-  AResp.Contents.Add('"displayRequestDuration": true,');
+  //AResp.Contents.Add('"displayRequestDuration": true,');
   AResp.Contents.Add('"docExpansion": "none",');
   AResp.Contents.Add('"showExtensions": true,');
   AResp.Contents.Add('"showCommonExtensions": true,');
@@ -481,36 +481,42 @@ begin
   Result := Self;
 end;
 
-function THTTPDocRoute.AddPathParam(AName: string; Required: Boolean
-  ): THTTPDocRoute;
+function THTTPDocRoute.AddPathParam(AName: string; Required: Boolean;
+  ParamType: string; DefaultValue: string): THTTPDocRoute;
 begin
   Result := Self.AddParam(
     AName,
     AName,
     Required,
-    piPath
+    piPath,
+    ParamType,
+    DefaultValue
   );
 end;
 
-function THTTPDocRoute.AddQueryParam(AName: string; Required: Boolean
-  ): THTTPDocRoute;
+function THTTPDocRoute.AddQueryParam(AName: string; Required: Boolean;
+  ParamType: string; DefaultValue: string): THTTPDocRoute;
 begin
   Result := Self.AddParam(
     AName,
     AName,
     Required,
-    piQuery
+    piQuery,
+    ParamType,
+    DefaultValue
   );
 end;
 
-function THTTPDocRoute.AddHeaderParam(AName: string; Required: Boolean
-  ): THTTPDocRoute;
+function THTTPDocRoute.AddHeaderParam(AName: string; Required: Boolean;
+  ParamType: string; DefaultValue: string): THTTPDocRoute;
 begin
   Result := Self.AddParam(
     AName,
     AName,
     Required,
-    piHeader
+    piHeader,
+    ParamType,
+    DefaultValue
   );
 end;
 
