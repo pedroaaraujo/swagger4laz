@@ -147,9 +147,12 @@ type
 
     class function Initialize: TSwaggerRouter;
 
-    function RegisterRoute(Const APattern : String; AMethod : TRouteMethod; ACallBack: TRouteCallBack; IsDefault : Boolean = False): THTTPDocRoute;
-    function RegisterModel(AName: string; AModel: TJSONData): TSwaggerRouter;
-      overload;
+    function RegisterRoute(Const APattern: String; AMethod : TRouteMethod; ACallBack: TRouteCallBack; IsDefault : Boolean = False): THTTPDocRoute;
+    function Get(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Post(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Put(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Delete(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function RegisterModel(AName: string; AModel: TJSONData): TSwaggerRouter; overload;
     function RegisterModel(AName: string; AModel: string): TSwaggerRouter; overload;
     function SetDocRoute(Endpoint: string): TSwaggerRouter;
     function SetTitle(ATitle: string): TSwaggerRouter;
@@ -667,6 +670,46 @@ function TSwaggerRouter.RegisterRoute(const APattern: String;
   ): THTTPDocRoute;
 begin
   Result := HTTPRouter.RegisterDocRoute(APattern, AMethod, ACallBack, IsDefault);
+end;
+
+function TSwaggerRouter.Get(const APattern: string; ACallBack: TRouteCallBack
+  ): THTTPDocRoute;
+begin
+  Result := RegisterRoute(
+    APattern,
+    rmGet,
+    ACallBack
+  );
+end;
+
+function TSwaggerRouter.Post(const APattern: string; ACallBack: TRouteCallBack
+  ): THTTPDocRoute;
+begin
+  Result := RegisterRoute(
+    APattern,
+    rmPost,
+    ACallBack
+  );
+end;
+
+function TSwaggerRouter.Put(const APattern: string; ACallBack: TRouteCallBack
+  ): THTTPDocRoute;
+begin
+  Result := RegisterRoute(
+    APattern,
+    rmPut,
+    ACallBack
+  );
+end;
+
+function TSwaggerRouter.Delete(const APattern: string; ACallBack: TRouteCallBack
+  ): THTTPDocRoute;
+begin
+  Result := RegisterRoute(
+    APattern,
+    rmDelete,
+    ACallBack
+  );
 end;
 
 function TSwaggerRouter.SetDocRoute(Endpoint: string): TSwaggerRouter;
