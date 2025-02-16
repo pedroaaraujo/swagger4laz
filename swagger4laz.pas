@@ -109,6 +109,9 @@ type
 
     property Security: TSecurityScheme read FSecurity;
     function SetSecurity(Scheme: TSecurityScheme): THTTPDocRoute;
+    function SetSecurityBearer: THTTPDocRoute;
+    function SetSecurityBasic: THTTPDocRoute;
+    function SetSecurityNone: THTTPDocRoute;
 
     property Tags: TStrings read FTags;
     function AddTags(ADescription: string): THTTPDocRoute;
@@ -586,6 +589,21 @@ begin
       SwaggerRouter.Components.SecuritySchemes +
       [Scheme]
   end;
+end;
+
+function THTTPDocRoute.SetSecurityBearer: THTTPDocRoute;
+begin
+  Result := SetSecurity(ssBearer);
+end;
+
+function THTTPDocRoute.SetSecurityBasic: THTTPDocRoute;
+begin
+  Result := SetSecurity(ssBasic);
+end;
+
+function THTTPDocRoute.SetSecurityNone: THTTPDocRoute;
+begin
+  Result := SetSecurity(ssNone);
 end;
 
 function TSwaggerRouter.RegisterModel(AName: string; AModel: TJSONData
