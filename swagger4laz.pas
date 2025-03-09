@@ -302,7 +302,7 @@ begin
   AResp.Contents.Add('<html>');
   AResp.Contents.Add('<head>');
   AResp.Contents.Add('  <link type="text/css" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">');
-  AResp.Contents.Add('  <title>Swagger UI</title>');
+  AResp.Contents.Add('  <title>' + SwaggerRouter.Title + ' - Swagger UI</title>');
   AResp.Contents.Add('</head>');
   AResp.Contents.Add('<body>');
   AResp.Contents.Add('  <div id="swagger-ui">');
