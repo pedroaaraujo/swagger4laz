@@ -137,6 +137,7 @@ type
     FVersion: string;
     FDescription: string;
     FDefaultContentType: string;
+    FDefaultCustomHeaders: TStringList;
     procedure HTTPRouterAfterRequest(Sender: TObject; ARequest: TRequest;
       AResponse: TResponse);
     procedure HTTPRouterBeforeRequest(Sender: TObject; ARequest: TRequest;
@@ -162,6 +163,7 @@ type
     function SetVersion(AVersion: string): TSwaggerRouter;
     function SetDescription(Text: string): TSwaggerRouter;
     function SetDefaultContentType(Text: string): TSwaggerRouter;
+    function AddCustomHeader(const AHeader, AValue: string): TSwaggerRouter;
 
     constructor Create;
     destructor Destroy; override;
@@ -659,16 +661,23 @@ end;
 
 { TSwaggerRouter }
 
-procedure TSwaggerRouter.HTTPRouterBeforeRequest(Sender: TObject;
-  ARequest: TRequest; AResponse: TResponse);
-begin
-  AResponse.ContentType := SwaggerRouter.DefaultContentType;
-end;
-
 procedure TSwaggerRouter.HTTPRouterAfterRequest(Sender: TObject;
   ARequest: TRequest; AResponse: TResponse);
 begin
 
+end;
+
+procedure TSwaggerRouter.HTTPRouterBeforeRequest(Sender: TObject;
+  ARequest: TRequest; AResponse: TResponse);
+var
+  I: Integer;
+begin
+  AResponse.ContentType := SwaggerRouter.DefaultContentType;
+
+  for I := 0 to Pred(SwaggerRouter.FDefaultCustomHeaders.Count) do
+  begin
+    AResponse.CustomHeaders.Add(SwaggerRouter.FDefaultCustomHeaders.Strings[I]);
+  end;
 end;
 
 class function TSwaggerRouter.Initialize: TSwaggerRouter;
@@ -761,14 +770,25 @@ begin
   Result := Self;
 end;
 
+function TSwaggerRouter.AddCustomHeader(const AHeader, AValue: string
+  ): TSwaggerRouter;
+begin
+  Result := Self;
+
+  FDefaultCustomHeaders.Values[AHeader] := AValue;
+end;
+
 constructor TSwaggerRouter.Create;
 begin
+  inherited;
+  FDefaultCustomHeaders := TStringList.Create;
   FComponents := TSwaggerComponents.Create;
 end;
 
 destructor TSwaggerRouter.Destroy;
 begin
   FComponents.Free;
+  FDefaultCustomHeaders.Free;
   inherited Destroy;
 end;
 
