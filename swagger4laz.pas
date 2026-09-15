@@ -104,7 +104,7 @@ type
 
     function SetSummary(Text: string): THTTPDocRoute;
     function SetDescription(Text: string): THTTPDocRoute;
-    function SetOperationId(OpId: string): THTTPDocRoute;
+    function SetOperationId(AId: string): THTTPDocRoute;
     function SetDeprecated(Value: Boolean = True): THTTPDocRoute;
 
     property Responses: TResponseList read FResponses;
@@ -159,14 +159,17 @@ type
     FServers: TJSONArray;
     FContactObj: TJSONObject;
     FLicenseObj: TJSONObject;
+    FBasePath: string;
     FDocCache: string;
     procedure HTTPRouterAfterRequest(Sender: TObject; ARequest: TRequest; AResponse: TResponse);
     procedure HTTPRouterBeforeRequest(Sender: TObject; ARequest: TRequest; AResponse: TResponse);
+    function ResolveBasePath(AReq: TRequest): string;
   public
     property Title: string read FTitle;
     property Version: string read FVersion;
     property Description: string read FDescription;
     property DefaultContentType: string read FDefaultContentType;
+    property BasePath: string read FBasePath;
     property Components: TSwaggerComponents read FComponents;
 
     class function Initialize: TSwaggerRouter;
@@ -188,6 +191,7 @@ type
     function SetTitle(ATitle: string): TSwaggerRouter;
     function SetVersion(AVersion: string): TSwaggerRouter;
     function SetDescription(Text: string): TSwaggerRouter;
+    function SetBasePath(const APath: string): TSwaggerRouter;
     function SetContact(const Name, Url, Email: string): TSwaggerRouter;
     function SetLicense(const Name, Url: string): TSwaggerRouter;
     function AddServer(const Url: string; const ADescription: string = ''): TSwaggerRouter;
@@ -218,12 +222,33 @@ begin
   end;
 end;
 
+function TSwaggerRouter.ResolveBasePath(AReq: TRequest): string;
+var
+  ForwardedPrefix: string;
+begin
+  Result := FBasePath;
+
+  if AReq <> nil then
+  begin
+    ForwardedPrefix := AReq.GetCustomHeader('X-Forwarded-Prefix');
+    if not ForwardedPrefix.IsEmpty then
+    begin
+      Result := ForwardedPrefix;
+      if not Result.StartsWith('/') then
+        Result := '/' + Result;
+
+      if Result.EndsWith('/') then
+        Result := Copy(Result, 1, Length(Result) - 1);
+    end;
+  end;
+end;
+
 procedure Documentacao(AReq: TRequest; AResp: TResponse);
 var
   I: Integer;
   Json, JsonInfo, JsonPaths, JsonURI, JsonMethod, SecurityItem: TJSONObject;
-  SecurityArr: TJSONArray;
-  Pattern, Str, MethodStr: string;
+  SecurityArr, ServersArray: TJSONArray;
+  Pattern, Str, MethodStr, EffectiveBasePath: string;
   Route: THTTPDocRoute;
   SL: TStringList;
 begin
@@ -235,6 +260,8 @@ begin
     AResp.SendContent;
     Exit;
   end;
+
+  EffectiveBasePath := SwaggerRouter.ResolveBasePath(AReq);
 
   Json := TJSONObject.Create;
   JsonInfo := TJSONObject.Create;
@@ -256,8 +283,24 @@ begin
 
     Json.Add('info', JsonInfo);
 
+    ServersArray := TJSONArray.Create;
     if SwaggerRouter.FServers.Count > 0 then
-      Json.Add('servers', SwaggerRouter.FServers.Clone as TJSONArray);
+    begin
+      ServersArray.Free;
+      ServersArray := SwaggerRouter.FServers.Clone as TJSONArray;
+    end
+    else if not EffectiveBasePath.IsEmpty then
+    begin
+      SecurityItem := TJSONObject.Create;
+      SecurityItem.Add('url', EffectiveBasePath);
+      SecurityItem.Add('description', 'Reverse Proxy Base Path');
+      ServersArray.Add(SecurityItem);
+    end;
+
+    if ServersArray.Count > 0 then
+      Json.Add('servers', ServersArray)
+    else
+      ServersArray.Free;
 
     for I := 0 to Pred(HTTPRouter.RouteCount) do
     begin
@@ -279,6 +322,8 @@ begin
       Pattern := ReplaceUrlParameter(Route.URLPattern);
       if not Pattern.StartsWith('/') then
         Pattern := '/' + Pattern;
+      if (Length(Pattern) > 1) and Pattern.EndsWith('/') then
+        Pattern := Copy(Pattern, 1, Length(Pattern) - 1);
 
       JsonURI := JsonPaths.Find(Pattern) as TJSONObject;
       if JsonURI = nil then
@@ -343,7 +388,10 @@ begin
         MethodStr := 'get';
       end;
 
-      JsonURI.Add(MethodStr, JsonMethod);
+      if JsonURI.Find(MethodStr) = nil then
+        JsonURI.Add(MethodStr, JsonMethod)
+      else
+        JsonMethod.Free;
     end;
 
     Json.Add('paths', JsonPaths);
@@ -359,7 +407,12 @@ begin
 end;
 
 procedure SwaggerUI(AReq: TRequest; AResp: TResponse);
+var
+  BasePath, JsonUrl: string;
 begin
+  BasePath := SwaggerRouter.ResolveBasePath(AReq);
+  JsonUrl := BasePath + '/openapi.json';
+
   AResp.ContentType := 'text/html';
   AResp.Contents.Clear;
   AResp.Contents.Add('<!DOCTYPE html>');
@@ -375,7 +428,7 @@ begin
   AResp.Contents.Add('  <script>');
   AResp.Contents.Add('    window.onload = function() {');
   AResp.Contents.Add('      const ui = SwaggerUIBundle({');
-  AResp.Contents.Add('        url: "/openapi.json",');
+  AResp.Contents.Add('        url: "' + JsonUrl + '",');
   AResp.Contents.Add('        dom_id: "#swagger-ui",');
   AResp.Contents.Add('        deepLinking: true,');
   AResp.Contents.Add('        docExpansion: "list",');
@@ -490,9 +543,9 @@ begin
   Result := Self;
 end;
 
-function THTTPDocRoute.SetOperationId(OpId: string): THTTPDocRoute;
+function THTTPDocRoute.SetOperationId(AId: string): THTTPDocRoute;
 begin
-  FOperationId := OpId;
+  FOperationId := AId;
   Result := Self;
 end;
 
@@ -710,12 +763,6 @@ begin
       RefObj.Add('$ref', '#/components/schemas/' + ContentStr);
       JSchema.Add('schema', RefObj);
     end;
-  end
-  else
-  begin
-    RefObj := TJSONObject.Create;
-    RefObj.Add('$ref', '#/components/schemas/' + ContentStr);
-    JSchema.Add('schema', RefObj);
   end;
 end;
 
@@ -774,6 +821,7 @@ begin
   FDefaultCustomHeaders := TStringList.Create;
   FComponents := TSwaggerComponents.Create;
   FServers := TJSONArray.Create;
+  FBasePath := '';
   FDocCache := '';
 end;
 
@@ -906,12 +954,31 @@ begin
 end;
 
 function TSwaggerRouter.SetDocRoute(Endpoint: string): TSwaggerRouter;
+var
+  CleanEndpoint: string;
 begin
-  if Endpoint.IsEmpty then
-    Endpoint := '/docs';
+  CleanEndpoint := Endpoint;
+  if CleanEndpoint.IsEmpty then
+    CleanEndpoint := '/docs';
 
-  HTTPRouter.RegisterRoute(Endpoint, httproute.TRouteMethod(rmGet), @SwaggerUI);
-  HTTPRouter.RegisterRoute('/openapi.json', httproute.TRouteMethod(rmGet), @Documentacao);
+  if CleanEndpoint.EndsWith('/') and (Length(CleanEndpoint) > 1) then
+    CleanEndpoint := Copy(CleanEndpoint, 1, Length(CleanEndpoint) - 1);
+
+  try
+    HTTPRouter.RegisterRoute(CleanEndpoint, httproute.TRouteMethod(rmGet), @SwaggerUI);
+  except
+  end;
+
+  try
+    HTTPRouter.RegisterRoute(CleanEndpoint + '/', httproute.TRouteMethod(rmGet), @SwaggerUI);
+  except
+  end;
+
+  try
+    HTTPRouter.RegisterRoute('/openapi.json', httproute.TRouteMethod(rmGet), @Documentacao);
+  except
+  end;
+
   Result := Self;
 end;
 
@@ -930,6 +997,16 @@ end;
 function TSwaggerRouter.SetDescription(Text: string): TSwaggerRouter;
 begin
   FDescription := Text;
+  Result := Self;
+end;
+
+function TSwaggerRouter.SetBasePath(const APath: string): TSwaggerRouter;
+begin
+  FBasePath := Trim(APath);
+  if (not FBasePath.IsEmpty) and (not FBasePath.StartsWith('/')) then
+    FBasePath := '/' + FBasePath;
+  if FBasePath.EndsWith('/') then
+    FBasePath := Copy(FBasePath, Length(FBasePath) - 1);
   Result := Self;
 end;
 
@@ -952,8 +1029,7 @@ begin
   Result := Self;
 end;
 
-function TSwaggerRouter.AddServer(const Url: string; const ADescription: string
-  ): TSwaggerRouter;
+function TSwaggerRouter.AddServer(const Url: string; const ADescription: string): TSwaggerRouter;
 var
   ServerObj: TJSONObject;
 begin
