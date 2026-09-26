@@ -161,7 +161,7 @@ type
     FLicenseObj: TJSONObject;
     FBasePath: string;
     FDocCache: string;
-    FCacheLock: TCriticalSection; // [Adicionado] Protege a geração do cache
+    FCacheLock: TCriticalSection;
     procedure HTTPRouterAfterRequest(Sender: TObject; ARequest: TRequest; AResponse: TResponse);
     procedure HTTPRouterBeforeRequest(Sender: TObject; ARequest: TRequest; AResponse: TResponse);
     function ResolveBasePath(AReq: TRequest): string;
@@ -233,16 +233,16 @@ end;
 
 procedure Documentacao(AReq: TRequest; AResp: TResponse);
 var
-  I: Integer;
+  I, RouteIdx: Integer;
   Json, JsonInfo, JsonPaths, JsonURI, JsonMethod, SecurityItem: TJSONObject;
   SecurityArr, ServersArray: TJSONArray;
-  Pattern, MethodStr, EffectiveBasePath: string;
+  Pattern, MethodStr, EffectiveBasePath, SortKey: string;
   Route: THTTPDocRoute;
   RegEx: TRegExpr;
+  SL: TStringList;
 begin
   AResp.ContentType := 'application/json';
 
-  // [Segurança Thread-Safe] Tenta ler o cache fora do lock para velocidade extrema
   if not SwaggerRouter.FDocCache.IsEmpty then
   begin
     AResp.Content := SwaggerRouter.FDocCache;
@@ -250,10 +250,8 @@ begin
     Exit;
   end;
 
-  // Se não tem cache, trava a seção crítica
   SwaggerRouter.FCacheLock.Acquire;
   try
-    // Verifica novamente, pois outra thread pode ter acabado de gerar o cache enquanto esta esperava o lock
     if not SwaggerRouter.FDocCache.IsEmpty then
     begin
       AResp.Content := SwaggerRouter.FDocCache;
@@ -266,7 +264,6 @@ begin
     try
       Json.Add('openapi', '3.1.0');
 
-      // [Prevenção Memory Leak] Criado e adicionado imediatamente à árvore JSON
       JsonInfo := TJSONObject.Create;
       Json.Add('info', JsonInfo);
 
@@ -282,125 +279,138 @@ begin
         JsonInfo.Add('license', SwaggerRouter.FLicenseObj.Clone as TJSONObject);
 
       ServersArray := TJSONArray.Create;
-      // Adiciona imediatamente para evitar vazamentos
       Json.Add('servers', ServersArray);
 
       if SwaggerRouter.FServers.Count > 0 then
       begin
-        // Se já existirem servidores configurados, clonamos
         ServersArray.Free;
         ServersArray := SwaggerRouter.FServers.Clone as TJSONArray;
-        Json.Elements['servers'] := ServersArray; // Reposiciona na árvore
+        Json.Elements['servers'] := ServersArray;
       end
       else if not EffectiveBasePath.IsEmpty then
       begin
         SecurityItem := TJSONObject.Create;
-        ServersArray.Add(SecurityItem); // Adicionado à árvore
+        ServersArray.Add(SecurityItem);
         SecurityItem.Add('url', EffectiveBasePath);
         SecurityItem.Add('description', 'Reverse Proxy Base Path');
       end
       else
-        Json.Delete('servers'); // Remove se ficou vazio
+        Json.Delete('servers');
 
       JsonPaths := TJSONObject.Create;
       Json.Add('paths', JsonPaths);
 
-      // [Otimização CPU] Regex compilada uma única vez fora do laço
       RegEx := TRegExpr.Create;
+      SL := TStringList.Create;
       try
         RegEx.Expression := ':(\w+)';
 
-        // [Correção Lógica] Removido o TStringList.Sort com Tags.Text!
-        // Iteramos as rotas diretamente. O Swagger UI agrupa automaticamente.
         for I := 0 to Pred(HTTPRouter.RouteCount) do
         begin
           if HTTPRouter.Routes[I] is THTTPDocRoute then
           begin
             Route := THTTPDocRoute(HTTPRouter.Routes[I]);
 
-            Pattern := RegEx.Replace(Route.URLPattern, '{$1}', True);
-
-            if not Pattern.StartsWith('/') then
-              Pattern := '/' + Pattern;
-            if (Length(Pattern) > 1) and Pattern.EndsWith('/') then
-              Pattern := Copy(Pattern, 1, Length(Pattern) - 1);
-
-            JsonURI := JsonPaths.Find(Pattern) as TJSONObject;
-            if JsonURI = nil then
-            begin
-              JsonURI := TJSONObject.Create;
-              JsonPaths.Add(Pattern, JsonURI);
-            end;
-
-            JsonMethod := TJSONObject.Create;
-            with Route do
-            begin
-              JsonMethod.Add('tags', JsonTags);
-              JsonMethod.Add('summary', Summary);
-              if not Description.IsEmpty then
-                JsonMethod.Add('description', Description);
-
-              JsonMethod.Add('operationId', OperationId);
-              JsonMethod.Add('deprecated', IsDeprecated);
-              JsonMethod.Add('parameters', JsonParams);
-              JsonMethod.Add('responses', JsonResponse);
-
-              if not BodyContent.Content.IsEmpty then
-                JsonMethod.Add('requestBody', JsonBody);
-
-              case Route.Security of
-                ssBasic:
-                  begin
-                    SecurityArr := TJSONArray.Create;
-                    SecurityItem := TJSONObject.Create;
-                    SecurityItem.Add('BasicAuth', TJSONArray.Create);
-                    SecurityArr.Add(SecurityItem);
-                    JsonMethod.Add('security', SecurityArr);
-                  end;
-                ssBearer:
-                  begin
-                    SecurityArr := TJSONArray.Create;
-                    SecurityItem := TJSONObject.Create;
-                    SecurityItem.Add('BearerAuth', TJSONArray.Create);
-                    SecurityArr.Add(SecurityItem);
-                    JsonMethod.Add('security', SecurityArr);
-                  end;
-                ssApiKey:
-                  begin
-                    SecurityArr := TJSONArray.Create;
-                    SecurityItem := TJSONObject.Create;
-                    SecurityItem.Add('ApiKeyAuth', TJSONArray.Create);
-                    SecurityArr.Add(SecurityItem);
-                    JsonMethod.Add('security', SecurityArr);
-                  end;
-              end;
-            end;
-
-            case TRouteMethod(Route.Method) of
-              rmGet: MethodStr := 'get';
-              rmPost: MethodStr := 'post';
-              rmPut: MethodStr := 'put';
-              rmDelete: MethodStr := 'delete';
-              rmOptions: MethodStr := 'options';
-              rmHead: MethodStr := 'head';
-              rmTrace: MethodStr := 'trace';
+            if Route.Tags.Count > 0 then
+              SortKey := Route.Tags[0]
             else
-              MethodStr := 'get';
-            end;
+              SortKey := 'zzzz_untagged';
 
-            if JsonURI.Find(MethodStr) = nil then
-              JsonURI.Add(MethodStr, JsonMethod)
-            else
-              JsonMethod.Free;
+            SortKey := SortKey + '|' + Route.URLPattern;
+
+            SL.AddObject(SortKey, TObject(PtrInt(I)));
           end;
         end;
+
+        SL.Sort;
+
+        for RouteIdx := 0 to Pred(SL.Count) do
+        begin
+          I := PtrInt(SL.Objects[RouteIdx]);
+          Route := THTTPDocRoute(HTTPRouter.Routes[I]);
+
+          Pattern := RegEx.Replace(Route.URLPattern, '{$1}', True);
+
+          if not Pattern.StartsWith('/') then
+            Pattern := '/' + Pattern;
+          if (Length(Pattern) > 1) and Pattern.EndsWith('/') then
+            Pattern := Copy(Pattern, 1, Length(Pattern) - 1);
+
+          JsonURI := JsonPaths.Find(Pattern) as TJSONObject;
+          if JsonURI = nil then
+          begin
+            JsonURI := TJSONObject.Create;
+            JsonPaths.Add(Pattern, JsonURI);
+          end;
+
+          JsonMethod := TJSONObject.Create;
+          with Route do
+          begin
+            JsonMethod.Add('tags', JsonTags);
+            JsonMethod.Add('summary', Summary);
+            if not Description.IsEmpty then
+              JsonMethod.Add('description', Description);
+
+            JsonMethod.Add('operationId', OperationId);
+            JsonMethod.Add('deprecated', IsDeprecated);
+            JsonMethod.Add('parameters', JsonParams);
+            JsonMethod.Add('responses', JsonResponse);
+
+            if not BodyContent.Content.IsEmpty then
+              JsonMethod.Add('requestBody', JsonBody);
+
+            case Route.Security of
+              ssBasic:
+                begin
+                  SecurityArr := TJSONArray.Create;
+                  SecurityItem := TJSONObject.Create;
+                  SecurityItem.Add('BasicAuth', TJSONArray.Create);
+                  SecurityArr.Add(SecurityItem);
+                  JsonMethod.Add('security', SecurityArr);
+                end;
+              ssBearer:
+                begin
+                  SecurityArr := TJSONArray.Create;
+                  SecurityItem := TJSONObject.Create;
+                  SecurityItem.Add('BearerAuth', TJSONArray.Create);
+                  SecurityArr.Add(SecurityItem);
+                  JsonMethod.Add('security', SecurityArr);
+                end;
+              ssApiKey:
+                begin
+                  SecurityArr := TJSONArray.Create;
+                  SecurityItem := TJSONObject.Create;
+                  SecurityItem.Add('ApiKeyAuth', TJSONArray.Create);
+                  SecurityArr.Add(SecurityItem);
+                  JsonMethod.Add('security', SecurityArr);
+                end;
+            end;
+          end;
+
+          case TRouteMethod(Route.Method) of
+            rmGet: MethodStr := 'get';
+            rmPost: MethodStr := 'post';
+            rmPut: MethodStr := 'put';
+            rmDelete: MethodStr := 'delete';
+            rmOptions: MethodStr := 'options';
+            rmHead: MethodStr := 'head';
+            rmTrace: MethodStr := 'trace';
+          else
+            MethodStr := 'get';
+          end;
+
+          if JsonURI.Find(MethodStr) = nil then
+            JsonURI.Add(MethodStr, JsonMethod)
+          else
+            JsonMethod.Free;
+        end;
       finally
+        SL.Free;
         RegEx.Free;
       end;
 
       Json.Add('components', SwaggerRouter.Components.ToJson);
 
-      // Preenche o cache global com a string JSON gerada
       SwaggerRouter.FDocCache := Json.AsJSON;
       AResp.Content := SwaggerRouter.FDocCache;
       AResp.SendContent;
@@ -437,7 +447,7 @@ begin
   AResp.Contents.Add('        url: "' + JsonUrl + '",');
   AResp.Contents.Add('        dom_id: "#swagger-ui",');
   AResp.Contents.Add('        deepLinking: true,');
-  AResp.Contents.Add('        docExpansion: "list",');
+  AResp.Contents.Add('        docExpansion: "none",');
   AResp.Contents.Add('        filter: true,');
   AResp.Contents.Add('        presets: [');
   AResp.Contents.Add('          SwaggerUIBundle.presets.apis,');
