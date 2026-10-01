@@ -2,16 +2,16 @@
 
 [![Lazarus](https://img.shields.io/badge/Lazarus-2.2%2B-blue.svg)](https://www.lazarus-ide.org/)
 [![FreePascal](https://img.shields.io/badge/FPC-3.2.2%2B-green.svg)](https://www.freepascal.org/)
-[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0.3-brightgreen.svg)](https://swagger.io/specification/)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1.0-brightgreen.svg)](https://swagger.io/specification/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Swagger4Laz** é uma biblioteca moderna e fluente para **Lazarus / Free Pascal (FPC)** desenvolvida para integrar-se perfeitamente com o **FCL-Web** (`httproute.THTTPRouter`). Ela automatiza a geração da especificação **OpenAPI 3.0** (`openapi.json`) e serve diretamente a interface visual do **Swagger UI**, eliminando a necessidade de servidores auxiliares (como Node.js) ou ferramentas externas.
+**Swagger4Laz** é uma biblioteca moderna e fluente para **Lazarus / Free Pascal (FPC)** desenvolvida para integrar-se perfeitamente com o **FCL-Web** (`httproute.THTTPRouter`). Ela automatiza a geração da especificação **OpenAPI 3.1** (`openapi.json`) e serve diretamente a interface visual do **Swagger UI**, eliminando a necessidade de servidores auxiliares (como Node.js) ou ferramentas externas.
 
 ---
 
 ## ✨ Recursos
 
-- 📄 **OpenAPI 3.0 Automático**: Gera dinamicamente o arquivo `openapi.json` a partir das rotas cadastradas.
+- 📄 **OpenAPI 3.1 Automático**: Gera dinamicamente o arquivo `openapi.json` a partir das rotas cadastradas.
 - 🎨 **Swagger UI Embutido**: Serve a interface web interativa do Swagger UI em rota configurável (padrão `/docs`).
 - 🔗 **Roteamento Fluente**: Extensão de `THTTPRouter` com métodos encadeados (`Get`, `Post`, `Put`, `Delete`).
 - 🎯 **Tratamento de Parâmetros**:
@@ -72,6 +72,10 @@ end.
 Acesse no navegador:
 - Swagger UI: `http://localhost:8080/docs`
 - OpenAPI JSON: `http://localhost:8080/docs/openapi.json`
+
+O documento JSON fica sob a rota do Swagger UI configurada com `SetDocRoute`.
+Por exemplo, `SetDocRoute('/api/docs')` registra a especificação em
+`/api/docs/openapi.json`.
 
 ---
 

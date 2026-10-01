@@ -5,7 +5,7 @@ unit swagger4laz;
 interface
 
 uses
-  Classes, SysUtils, syncobjs, httproute, HTTPDefs, RegExpr, fpjson, jsonparser, fgl, Variants, TypInfo;
+  Classes, SysUtils, StrUtils, syncobjs, httproute, HTTPDefs, RegExpr, fpjson, jsonparser, fgl, Variants, TypInfo;
 
 type
 
@@ -96,6 +96,7 @@ type
     FOperationId: string;
     FDeprecated: Boolean;
     FTags: TStrings;
+    procedure InvalidateCache;
   public
     property Summary: string read FSummary;
     property Description: string read FDescription;
@@ -160,7 +161,9 @@ type
     FContactObj: TJSONObject;
     FLicenseObj: TJSONObject;
     FBasePath: string;
+    FDocRoute: string;
     FDocCache: string;
+    FDocCacheBasePath: string;
     FCacheLock: TCriticalSection;
     procedure HTTPRouterAfterRequest(Sender: TObject; ARequest: TRequest; AResponse: TResponse);
     procedure HTTPRouterBeforeRequest(Sender: TObject; ARequest: TRequest; AResponse: TResponse);
@@ -208,7 +211,37 @@ var
   SwaggerRouter: TSwaggerRouter;
   HTTPRouter: THTTPRouter;
 
+procedure Documentacao(AReq: TRequest; AResp: TResponse);
+procedure SwaggerUI(AReq: TRequest; AResp: TResponse);
+
 implementation
+
+function IsSafePathPrefix(const APath: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := APath.IsEmpty or APath.StartsWith('/');
+  if not Result or (Pos('//', APath) > 0) or (Pos('\', APath) > 0) or
+     (Pos('?', APath) > 0) or (Pos('#', APath) > 0) or
+     (Pos('/../', '/' + APath + '/') > 0) or (Pos('/./', '/' + APath + '/') > 0) then
+    Exit(False);
+  for I := 1 to Length(APath) do
+    if not (APath[I] in ['a'..'z', 'A'..'Z', '0'..'9', '/', '-', '.', '_', '~']) then
+      Exit(False);
+end;
+
+function NormalizePathPrefix(const APath: string): string;
+begin
+  Result := Trim(APath);
+  if Result.IsEmpty then
+    Exit;
+  if not Result.StartsWith('/') then
+    Result := '/' + Result;
+  if not IsSafePathPrefix(Result) then
+    raise Exception.CreateFmt('Prefixo de rota inválido: %s', [APath]);
+  while (Length(Result) > 1) and Result.EndsWith('/') do
+    Delete(Result, Length(Result), 1);
+end;
 
 function TSwaggerRouter.ResolveBasePath(AReq: TRequest): string;
 var
@@ -221,47 +254,140 @@ begin
     ForwardedPrefix := AReq.GetCustomHeader('X-Forwarded-Prefix');
     if not ForwardedPrefix.IsEmpty then
     begin
-      Result := ForwardedPrefix;
-      if not Result.StartsWith('/') then
-        Result := '/' + Result;
-
-      if Result.EndsWith('/') then
-        Result := Copy(Result, 1, Length(Result) - 1);
+      if IsSafePathPrefix(ForwardedPrefix.Trim) then
+      begin
+        Result := NormalizePathPrefix(ForwardedPrefix);
+        if Result = '/' then
+          Result := '';
+      end;
     end;
+  end;
+end;
+
+function HtmlEscape(const AValue: string): string;
+begin
+  Result := StringReplace(AValue, '&', '&amp;', [rfReplaceAll]);
+  Result := StringReplace(Result, '<', '&lt;', [rfReplaceAll]);
+  Result := StringReplace(Result, '>', '&gt;', [rfReplaceAll]);
+  Result := StringReplace(Result, '"', '&quot;', [rfReplaceAll]);
+  Result := StringReplace(Result, '''', '&#39;', [rfReplaceAll]);
+end;
+
+function JavaScriptString(const AValue: string): string;
+var
+  JsonString: TJSONString;
+begin
+  JsonString := TJSONString.Create(AValue);
+  try
+    Result := JsonString.AsJSON;
+  finally
+    JsonString.Free;
+  end;
+  Result := StringReplace(Result, '<', '\u003C', [rfReplaceAll]);
+  Result := StringReplace(Result, '>', '\u003E', [rfReplaceAll]);
+  Result := StringReplace(Result, '&', '\u0026', [rfReplaceAll]);
+end;
+
+function JsonSchemaFromContent(const AContent: string): TJSONData;
+var
+  ContentName, RefName: string;
+begin
+  ContentName := Trim(AContent);
+  if ContentName.IsEmpty then
+    Exit(TJSONObject.Create);
+
+  if ContentName.StartsWith('{') or ContentName.StartsWith('[') then
+  begin
+    Result := GetJSON(ContentName);
+    if Result.JSONType <> jtObject then
+    begin
+      Result.Free;
+      raise Exception.Create('OpenAPI schema precisa ser um objeto JSON.');
+    end;
+    Exit;
+  end;
+
+  if ContentName.StartsWith('#/components/schemas/') then
+  begin
+    Result := TJSONObject.Create;
+    TJSONObject(Result).Add('$ref', ContentName);
+    Exit;
+  end;
+  if SwaggerRouter.Components.Models.Find(ContentName) = nil then
+    raise Exception.CreateFmt('Schema "%s" não registrado em components/schemas.',
+      [ContentName]);
+
+  RefName := ContentName;
+  RefName := StringReplace(RefName, '~', '~0', [rfReplaceAll]);
+  RefName := StringReplace(RefName, '/', '~1', [rfReplaceAll]);
+  Result := TJSONObject.Create;
+  TJSONObject(Result).Add('$ref', '#/components/schemas/' + RefName);
+end;
+
+function ParameterDefaultJson(const AType, AName, AValue: string): TJSONData;
+var
+  Parsed: string;
+  TypeIndex: Integer;
+begin
+  Result := nil;
+  if AValue = '' then
+    Exit;
+  TypeIndex := IndexText(AType, ['string', 'integer', 'number', 'boolean']);
+  case TypeIndex of
+    0: Result := TJSONString.Create(AValue);
+    1, 2:
+      begin
+        Parsed := AValue.Trim;
+        Result := GetJSON(Parsed);
+        if Result.JSONType <> jtNumber then
+        begin
+          Result.Free;
+          Result := nil;
+          raise Exception.CreateFmt('Valor padrão numérico inválido para %s.', [AName]);
+        end;
+        if (TypeIndex = 1) and
+           ((Pos('.', Parsed) > 0) or (Pos('e', LowerCase(Parsed)) > 0)) then
+        begin
+          Result.Free;
+          Result := nil;
+          raise Exception.CreateFmt('Valor padrão inteiro inválido para %s.', [AName]);
+        end;
+      end;
+    3:
+      if SameText(AValue, 'true') then
+        Result := TJSONBoolean.Create(True)
+      else if SameText(AValue, 'false') then
+        Result := TJSONBoolean.Create(False)
+      else
+        raise Exception.CreateFmt('Valor padrão booleano inválido para %s.', [AName]);
+  else
+    raise Exception.CreateFmt('Tipo OpenAPI inválido para %s.', [AName]);
   end;
 end;
 
 procedure Documentacao(AReq: TRequest; AResp: TResponse);
 var
-  I, RouteIdx: Integer;
+  I, J, K, RouteIdx: Integer;
   Json, JsonInfo, JsonPaths, JsonURI, JsonMethod, SecurityItem: TJSONObject;
   SecurityArr, ServersArray: TJSONArray;
-  Pattern, MethodStr, EffectiveBasePath, SortKey: string;
+  Pattern, MethodStr, EffectiveBasePath, SortKey, ResponseBody: string;
   Route: THTTPDocRoute;
   RegEx: TRegExpr;
-  SL: TStringList;
+  SL, OperationIds, PathParams: TStringList;
 begin
   AResp.ContentType := 'application/json';
-
-  if not SwaggerRouter.FDocCache.IsEmpty then
-  begin
-    AResp.Content := SwaggerRouter.FDocCache;
-    AResp.SendContent;
-    Exit;
-  end;
-
+  EffectiveBasePath := SwaggerRouter.ResolveBasePath(AReq);
   SwaggerRouter.FCacheLock.Acquire;
   try
-    if not SwaggerRouter.FDocCache.IsEmpty then
+    if not SwaggerRouter.FDocCache.IsEmpty and
+       (SwaggerRouter.FDocCacheBasePath = EffectiveBasePath) then
     begin
-      AResp.Content := SwaggerRouter.FDocCache;
-      AResp.SendContent;
-      Exit;
-    end;
-
-    EffectiveBasePath := SwaggerRouter.ResolveBasePath(AReq);
-    Json := TJSONObject.Create;
-    try
+      ResponseBody := SwaggerRouter.FDocCache;
+    end
+    else
+    begin
+      Json := TJSONObject.Create;
+      try
       Json.Add('openapi', '3.1.0');
 
       JsonInfo := TJSONObject.Create;
@@ -278,17 +404,15 @@ begin
       if SwaggerRouter.FLicenseObj <> nil then
         JsonInfo.Add('license', SwaggerRouter.FLicenseObj.Clone as TJSONObject);
 
-      ServersArray := TJSONArray.Create;
-      Json.Add('servers', ServersArray);
-
       if SwaggerRouter.FServers.Count > 0 then
       begin
-        ServersArray.Free;
         ServersArray := SwaggerRouter.FServers.Clone as TJSONArray;
-        Json.Elements['servers'] := ServersArray;
+        Json.Add('servers', ServersArray);
       end
       else if not EffectiveBasePath.IsEmpty then
       begin
+        ServersArray := TJSONArray.Create;
+        Json.Add('servers', ServersArray);
         SecurityItem := TJSONObject.Create;
         ServersArray.Add(SecurityItem);
         SecurityItem.Add('url', EffectiveBasePath);
@@ -302,6 +426,8 @@ begin
 
       RegEx := TRegExpr.Create;
       SL := TStringList.Create;
+      OperationIds := TStringList.Create;
+      PathParams := TStringList.Create;
       try
         RegEx.Expression := ':(\w+)';
 
@@ -329,6 +455,34 @@ begin
           I := PtrInt(SL.Objects[RouteIdx]);
           Route := THTTPDocRoute(HTTPRouter.Routes[I]);
 
+          PathParams.Clear;
+          if RegEx.Exec(Route.URLPattern) then
+          begin
+            repeat
+              PathParams.Add(RegEx.Match[1]);
+            until not RegEx.ExecNext;
+          end;
+          for J := 0 to PathParams.Count - 1 do
+          begin
+            K := 0;
+            while (K < Route.Params.Count) and
+              not ((Route.Params[K].ParamIn = piPath) and
+                SameText(Route.Params[K].Name, PathParams[J])) do
+              Inc(K);
+            if K >= Route.Params.Count then
+            begin
+              // Auto-register missing path param
+              Route.AddPathParam(PathParams[J], True, 'string', '', '');
+            end
+            else if not Route.Params[K].Required then
+              Route.Params[K].Required := True;
+          end;
+          for J := 0 to Route.Params.Count - 1 do
+            if (Route.Params[J].ParamIn = piPath) and
+               (PathParams.IndexOf(Route.Params[J].Name) < 0) then
+              raise Exception.CreateFmt('Parâmetro de rota "%s" não existe em %s.',
+                [Route.Params[J].Name, Route.URLPattern]);
+
           Pattern := RegEx.Replace(Route.URLPattern, '{$1}', True);
 
           if not Pattern.StartsWith('/') then
@@ -351,7 +505,13 @@ begin
             if not Description.IsEmpty then
               JsonMethod.Add('description', Description);
 
-            JsonMethod.Add('operationId', OperationId);
+            if not OperationId.IsEmpty then
+            begin
+              if OperationIds.IndexOf(OperationId) >= 0 then
+                raise Exception.CreateFmt('operationId duplicado: %s', [OperationId]);
+              OperationIds.Add(OperationId);
+              JsonMethod.Add('operationId', OperationId);
+            end;
             JsonMethod.Add('deprecated', IsDeprecated);
             JsonMethod.Add('parameters', JsonParams);
             JsonMethod.Add('responses', JsonResponse);
@@ -396,15 +556,21 @@ begin
             rmHead: MethodStr := 'head';
             rmTrace: MethodStr := 'trace';
           else
-            MethodStr := 'get';
+            raise Exception.CreateFmt('Método HTTP não documentável em %s.',
+              [Route.URLPattern]);
           end;
 
           if JsonURI.Find(MethodStr) = nil then
             JsonURI.Add(MethodStr, JsonMethod)
           else
+          begin
             JsonMethod.Free;
+            raise Exception.CreateFmt('Rota duplicada para %s %s.', [MethodStr, Pattern]);
+          end;
         end;
       finally
+        PathParams.Free;
+        OperationIds.Free;
         SL.Free;
         RegEx.Free;
       end;
@@ -412,14 +578,17 @@ begin
       Json.Add('components', SwaggerRouter.Components.ToJson);
 
       SwaggerRouter.FDocCache := Json.AsJSON;
-      AResp.Content := SwaggerRouter.FDocCache;
-      AResp.SendContent;
-    finally
-      Json.Free;
+      SwaggerRouter.FDocCacheBasePath := EffectiveBasePath;
+      ResponseBody := SwaggerRouter.FDocCache;
+      finally
+        Json.Free;
+      end;
     end;
   finally
     SwaggerRouter.FCacheLock.Release;
   end;
+  AResp.Content := ResponseBody;
+  AResp.SendContent;
 end;
 
 procedure SwaggerUI(AReq: TRequest; AResp: TResponse);
@@ -427,7 +596,10 @@ var
   BasePath, JsonUrl: string;
 begin
   BasePath := SwaggerRouter.ResolveBasePath(AReq);
-  JsonUrl := BasePath + '/openapi.json';
+  if SwaggerRouter.FDocRoute = '/' then
+    JsonUrl := BasePath + '/openapi.json'
+  else
+    JsonUrl := BasePath + SwaggerRouter.FDocRoute + '/openapi.json';
 
   AResp.ContentType := 'text/html';
   AResp.Contents.Clear;
@@ -435,7 +607,7 @@ begin
   AResp.Contents.Add('<html>');
   AResp.Contents.Add('<head>');
   AResp.Contents.Add('  <meta charset="UTF-8">');
-  AResp.Contents.Add('  <title>' + SwaggerRouter.Title + ' - Swagger UI</title>');
+  AResp.Contents.Add('  <title>' + HtmlEscape(SwaggerRouter.Title) + ' - Swagger UI</title>');
   AResp.Contents.Add('  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">');
   AResp.Contents.Add('</head>');
   AResp.Contents.Add('<body>');
@@ -444,7 +616,7 @@ begin
   AResp.Contents.Add('  <script>');
   AResp.Contents.Add('    window.onload = function() {');
   AResp.Contents.Add('      const ui = SwaggerUIBundle({');
-  AResp.Contents.Add('        url: "' + JsonUrl + '",');
+  AResp.Contents.Add('        url: ' + JavaScriptString(JsonUrl) + ',');
   AResp.Contents.Add('        dom_id: "#swagger-ui",');
   AResp.Contents.Add('        deepLinking: true,');
   AResp.Contents.Add('        docExpansion: "none",');
@@ -547,27 +719,37 @@ begin
   inherited Destroy;
 end;
 
+procedure THTTPDocRoute.InvalidateCache;
+begin
+  if SwaggerRouter <> nil then
+    SwaggerRouter.ClearCache;
+end;
+
 function THTTPDocRoute.SetSummary(Text: string): THTTPDocRoute;
 begin
   FSummary := Text;
+  InvalidateCache;
   Result := Self;
 end;
 
 function THTTPDocRoute.SetDescription(Text: string): THTTPDocRoute;
 begin
   FDescription := Text;
+  InvalidateCache;
   Result := Self;
 end;
 
 function THTTPDocRoute.SetOperationId(AId: string): THTTPDocRoute;
 begin
   FOperationId := AId;
+  InvalidateCache;
   Result := Self;
 end;
 
 function THTTPDocRoute.SetDeprecated(Value: Boolean): THTTPDocRoute;
 begin
   FDeprecated := Value;
+  InvalidateCache;
   Result := Self;
 end;
 
@@ -581,56 +763,61 @@ function THTTPDocRoute.AddResponse(Code: string; ADescription: string;
   Content: string; ContentType: string): THTTPDocRoute;
 var
   Response: TDocResponse;
+  I: Integer;
 begin
+  if SameText(Code, 'default') then
+    Code := 'default'
+  else if (StrToIntDef(Code, 0) < 100) or (StrToIntDef(Code, 0) > 599) or
+          (IntToStr(StrToIntDef(Code, 0)) <> Code) then
+    raise Exception.CreateFmt('Código de resposta OpenAPI inválido: %s', [Code]);
+  if ContentType.Trim.IsEmpty then
+    raise Exception.Create('Content-Type da resposta não pode ficar vazio.');
+  for I := 0 to Responses.Count - 1 do
+    if SameText(Responses[I].Code, Code) then
+      raise Exception.CreateFmt('Resposta %s já foi documentada nesta rota.', [Code]);
   Response := TDocResponse.Create;
   Response.Code := Code;
   Response.Description := ADescription;
   Response.DocContent.Content := Content;
   Response.DocContent.ContentType := ContentType;
   FResponses.Add(Response);
+  InvalidateCache;
   Result := Self;
 end;
 
 function THTTPDocRoute.JsonResponse: TJSONObject;
 var
   R: TDocResponse;
-  Item, JsonCont, JsonSchema, RefObj: TJSONObject;
+  Item, JsonCont, JsonSchema: TJSONObject;
   ContentStr: string;
 begin
   Result := TJSONObject.Create;
-  for R in Responses do
-  begin
-    Item := TJSONObject.Create;
-    Item.Add('description', R.Description);
-
-    ContentStr := Trim(R.DocContent.Content);
-    if not ContentStr.IsEmpty then
+  try
+    for R in Responses do
     begin
-      JsonCont := TJSONObject.Create;
-      JsonSchema := TJSONObject.Create;
+      Item := TJSONObject.Create;
+      try
+        Item.Add('description', R.Description);
 
-      if ContentStr.StartsWith('{') or ContentStr.StartsWith('[') then
-      begin
-        try
-          JsonSchema.Add('schema', GetJSON(ContentStr));
-        except
-          RefObj := TJSONObject.Create;
-          RefObj.Add('$ref', '#/components/schemas/' + ContentStr);
-          JsonSchema.Add('schema', RefObj);
+        ContentStr := Trim(R.DocContent.Content);
+        if not ContentStr.IsEmpty then
+        begin
+          JsonCont := TJSONObject.Create;
+          Item.Add('content', JsonCont);
+          JsonSchema := TJSONObject.Create;
+          JsonCont.Add(R.DocContent.ContentType, JsonSchema);
+          JsonSchema.Add('schema', JsonSchemaFromContent(ContentStr));
         end;
-      end
-      else
-      begin
-        RefObj := TJSONObject.Create;
-        RefObj.Add('$ref', '#/components/schemas/' + ContentStr);
-        JsonSchema.Add('schema', RefObj);
+
+        Result.Add(R.Code, Item);
+        Item := nil;
+      finally
+        Item.Free;
       end;
-
-      JsonCont.Add(R.DocContent.ContentType, JsonSchema);
-      Item.Add('content', JsonCont);
     end;
-
-    Result.Add(R.Code, Item);
+  except
+    Result.Free;
+    raise;
   end;
 end;
 
@@ -639,7 +826,20 @@ function THTTPDocRoute.AddParam(AName: string; ATitle: string;
   ADescription: string): THTTPDocRoute;
 var
   Param: TDocReqParam;
+  DefaultData: TJSONData;
+  I: Integer;
 begin
+  if AName.Trim.IsEmpty then
+    raise Exception.Create('Nome do parâmetro não pode ficar vazio.');
+  if IndexText(ParamType, ['string', 'integer', 'number', 'boolean']) < 0 then
+    raise Exception.CreateFmt('Tipo de parâmetro OpenAPI inválido: %s', [ParamType]);
+  if (ParamIn = piPath) and not Required then
+    raise Exception.Create('Parâmetros de rota precisam ser obrigatórios.');
+  for I := 0 to FParams.Count - 1 do
+    if (FParams[I].ParamIn = ParamIn) and SameText(FParams[I].Name, AName) then
+      raise Exception.CreateFmt('Parâmetro %s já foi documentado nesta rota.', [AName]);
+  DefaultData := ParameterDefaultJson(LowerCase(ParamType), AName, ParamDefault);
+  DefaultData.Free;
   if ATitle.IsEmpty then
     ATitle := AName;
 
@@ -648,11 +848,12 @@ begin
   Param.Title := ATitle;
   Param.Description := ADescription;
   Param.Required := Required;
-  Param.ParamType := ParamType;
+  Param.ParamType := LowerCase(ParamType);
   Param.ParamIn := ParamIn;
   Param.ParamDefault := ParamDefault;
 
   FParams.Add(Param);
+  InvalidateCache;
   Result := Self;
 end;
 
@@ -662,6 +863,17 @@ var
   Param: TDocReqParam;
   I: Integer;
 begin
+  if AName.Trim.IsEmpty then
+    raise Exception.Create('Nome do parâmetro não pode ficar vazio.');
+  if (ParamIn = piPath) and not Required then
+    raise Exception.Create('Parâmetros de rota precisam ser obrigatórios.');
+  if Length(AValues) = 0 then
+    raise Exception.Create('Enum precisa ter pelo menos um valor.');
+  if (DefaultValue <> '') and (IndexStr(DefaultValue, AValues) < 0) then
+    raise Exception.Create('Valor padrão precisa estar entre os valores do enum.');
+  for I := 0 to FParams.Count - 1 do
+    if (FParams[I].ParamIn = ParamIn) and SameText(FParams[I].Name, AName) then
+      raise Exception.CreateFmt('Parâmetro %s já foi documentado nesta rota.', [AName]);
   Param := TDocReqParam.Create;
   Param.Name := AName;
   Param.Title := AName;
@@ -676,6 +888,7 @@ begin
     Param.EnumValues[I] := AValues[I];
 
   FParams.Add(Param);
+  InvalidateCache;
   Result := Self;
 end;
 
@@ -701,14 +914,18 @@ function THTTPDocRoute.JsonParams: TJSONArray;
 var
   JsonItem, JsonSchema: TJSONObject;
   EnumArr: TJSONArray;
+  DefaultData: TJSONData;
   P: TDocReqParam;
   I: Integer;
 begin
   Result := TJSONArray.Create;
-  for P in Params do
-  begin
+  try
+    for P in Params do
+    begin
     JsonItem := TJSONObject.Create;
+    Result.Add(JsonItem);
     JsonSchema := TJSONObject.Create;
+    JsonItem.Add('schema', JsonSchema);
 
     case P.ParamIn of
       piHeader: JsonItem.Add('in', 'header');
@@ -736,10 +953,15 @@ begin
       JsonSchema.Add('title', P.Title);
 
     if not VarIsNull(P.ParamDefault) and (VarToStr(P.ParamDefault) <> '') then
-      JsonSchema.Add('default', VarToStr(P.ParamDefault));
+    begin
+      DefaultData := ParameterDefaultJson(P.ParamType, P.Name, VarToStr(P.ParamDefault));
+      JsonSchema.Add('default', DefaultData);
+    end;
 
-    JsonItem.Add('schema', JsonSchema);
-    Result.Add(JsonItem);
+    end;
+  except
+    Result.Free;
+    raise;
   end;
 end;
 
@@ -750,43 +972,41 @@ begin
   FBodyContent.ContentType := ContentType;
   FBodyContent.Required := Required;
   FBodyContent.Description := ADescription;
+  InvalidateCache;
   Result := Self;
 end;
 
 function THTTPDocRoute.JsonBody: TJSONObject;
 var
-  JBody, JSchema, RefObj: TJSONObject;
+  JBody, JSchema: TJSONObject;
   ContentStr: string;
 begin
   Result := TJSONObject.Create;
-  JBody := TJSONObject.Create;
-  JSchema := TJSONObject.Create;
+  try
+    JBody := TJSONObject.Create;
+    Result.Add('content', JBody);
+    JSchema := TJSONObject.Create;
+    JBody.Add(FBodyContent.ContentType, JSchema);
 
-  if not FBodyContent.Description.IsEmpty then
-    Result.Add('description', FBodyContent.Description);
+    if not FBodyContent.Description.IsEmpty then
+      Result.Add('description', FBodyContent.Description);
+    Result.Add('required', FBodyContent.Required);
 
-  Result.Add('required', FBodyContent.Required);
-  Result.Add('content', JBody);
-  JBody.Add(FBodyContent.ContentType, JSchema);
-
-  ContentStr := Trim(FBodyContent.Content);
-  if ContentStr.StartsWith('{') or ContentStr.StartsWith('[') then
-  begin
-    try
-      JSchema.Add('schema', GetJSON(ContentStr));
-    except
-      RefObj := TJSONObject.Create;
-      RefObj.Add('$ref', '#/components/schemas/' + ContentStr);
-      JSchema.Add('schema', RefObj);
-    end;
+    ContentStr := Trim(FBodyContent.Content);
+    JSchema.Add('schema', JsonSchemaFromContent(ContentStr));
+  except
+    Result.Free;
+    raise;
   end;
 end;
 
 function THTTPDocRoute.SetSecurity(Scheme: TSecurityScheme): THTTPDocRoute;
 begin
   FSecurity := Scheme;
-  if not (Scheme in SwaggerRouter.Components.SecuritySchemes) then
+  if (Scheme <> ssNone) and
+     not (Scheme in SwaggerRouter.Components.SecuritySchemes) then
     SwaggerRouter.Components.SecuritySchemes := SwaggerRouter.Components.SecuritySchemes + [Scheme];
+  InvalidateCache;
   Result := Self;
 end;
 
@@ -802,6 +1022,11 @@ end;
 
 function THTTPDocRoute.SetSecurityApiKey(HeaderName: string): THTTPDocRoute;
 begin
+  if HeaderName.Trim.IsEmpty then
+    raise Exception.Create('Nome do header de API Key não pode ficar vazio.');
+  if (ssApiKey in SwaggerRouter.Components.SecuritySchemes) and
+     not SameText(SwaggerRouter.Components.ApiKeyHeaderName, HeaderName) then
+    raise Exception.Create('Swagger4Laz suporta um único nome de header para API Key.');
   SwaggerRouter.Components.ApiKeyHeaderName := HeaderName;
   Result := SetSecurity(ssApiKey);
 end;
@@ -814,6 +1039,7 @@ end;
 function THTTPDocRoute.AddTags(ADescription: string): THTTPDocRoute;
 begin
   FTags.Add(ADescription);
+  InvalidateCache;
   Result := Self;
 end;
 
@@ -838,8 +1064,12 @@ begin
   FDefaultCustomHeaders := TStringList.Create;
   FComponents := TSwaggerComponents.Create;
   FServers := TJSONArray.Create;
+  FTitle := 'API';
+  FVersion := '1.0.0';
   FBasePath := '';
+  FDocRoute := '';
   FDocCache := '';
+  FDocCacheBasePath := '';
 end;
 
 destructor TSwaggerRouter.Destroy;
@@ -858,6 +1088,7 @@ begin
   FCacheLock.Acquire;
   try
     FDocCache := '';
+    FDocCacheBasePath := '';
   finally
     FCacheLock.Release;
   end;
@@ -894,8 +1125,14 @@ function TSwaggerRouter.RegisterRoute(const APattern: String;
   AMethod: TRouteMethod; ACallBack: TRouteCallBack; IsDefault: Boolean
   ): THTTPDocRoute;
 begin
-  ClearCache;
-  Result := HTTPRouter.RegisterDocRoute(APattern, AMethod, ACallBack, IsDefault);
+  FCacheLock.Acquire;
+  try
+    Result := HTTPRouter.RegisterDocRoute(APattern, AMethod, ACallBack, IsDefault);
+    FDocCache := '';
+    FDocCacheBasePath := '';
+  finally
+    FCacheLock.Release;
+  end;
 end;
 
 function TSwaggerRouter.Get(const APattern: string; ACallBack: TRouteCallBack
@@ -925,15 +1162,37 @@ end;
 function TSwaggerRouter.RegisterModel(AName: string; AModel: TJSONData
   ): TSwaggerRouter;
 begin
-  ClearCache;
-  FComponents.Models.Add(AName, AModel);
+  if AName.Trim.IsEmpty then
+    raise Exception.Create('Nome do schema não pode ficar vazio.');
+  if AModel = nil then
+    raise Exception.CreateFmt('Schema "%s" não pode ser nil.', [AName]);
+  if AModel.JSONType <> jtObject then
+    raise Exception.CreateFmt('Schema "%s" precisa ser um objeto JSON.', [AName]);
+  FCacheLock.Acquire;
+  try
+    if FComponents.Models.Find(AName) <> nil then
+      raise Exception.CreateFmt('Schema "%s" já foi registrado.', [AName]);
+    FComponents.Models.Add(AName, AModel);
+    FDocCache := '';
+    FDocCacheBasePath := '';
+  finally
+    FCacheLock.Release;
+  end;
   Result := Self;
 end;
 
 function TSwaggerRouter.RegisterModel(AName: string; AModel: string
   ): TSwaggerRouter;
+var
+  Schema: TJSONData;
 begin
-  Result := RegisterModel(AName, GetJSON(AModel, False));
+  Schema := GetJSON(AModel, False);
+  try
+    Result := RegisterModel(AName, Schema);
+    Schema := nil;
+  finally
+    Schema.Free;
+  end;
 end;
 
 function TSwaggerRouter.RegisterEnumModel(AName: string; TypeInfoData: PTypeInfo): TSwaggerRouter;
@@ -980,27 +1239,26 @@ function TSwaggerRouter.SetDocRoute(Endpoint: string): TSwaggerRouter;
 var
   CleanEndpoint: string;
 begin
-  CleanEndpoint := Endpoint;
+  CleanEndpoint := NormalizePathPrefix(Endpoint);
   if CleanEndpoint.IsEmpty then
     CleanEndpoint := '/docs';
 
-  if CleanEndpoint.EndsWith('/') and (Length(CleanEndpoint) > 1) then
-    CleanEndpoint := Copy(CleanEndpoint, 1, Length(CleanEndpoint) - 1);
-
-  try
-    HTTPRouter.RegisterRoute(CleanEndpoint, httproute.TRouteMethod(rmGet), @SwaggerUI);
-  except
+  if not FDocRoute.IsEmpty then
+  begin
+    if FDocRoute = CleanEndpoint then
+      Exit(Self);
+    raise Exception.Create('A rota do Swagger já foi registrada e não pode ser alterada.');
   end;
 
-  try
+  ClearCache;
+  HTTPRouter.RegisterRoute(CleanEndpoint, httproute.TRouteMethod(rmGet), @SwaggerUI);
+  if CleanEndpoint <> '/' then
     HTTPRouter.RegisterRoute(CleanEndpoint + '/', httproute.TRouteMethod(rmGet), @SwaggerUI);
-  except
-  end;
-
-  try
-    HTTPRouter.RegisterRoute('/openapi.json', httproute.TRouteMethod(rmGet), @Documentacao);
-  except
-  end;
+  if CleanEndpoint = '/' then
+    HTTPRouter.RegisterRoute('/openapi.json', httproute.TRouteMethod(rmGet), @Documentacao)
+  else
+    HTTPRouter.RegisterRoute(CleanEndpoint + '/openapi.json', httproute.TRouteMethod(rmGet), @Documentacao);
+  FDocRoute := CleanEndpoint;
 
   Result := Self;
 end;
@@ -1008,28 +1266,32 @@ end;
 function TSwaggerRouter.SetTitle(ATitle: string): TSwaggerRouter;
 begin
   FTitle := ATitle;
+  ClearCache;
   Result := Self;
 end;
 
 function TSwaggerRouter.SetVersion(AVersion: string): TSwaggerRouter;
 begin
   FVersion := AVersion;
+  ClearCache;
   Result := Self;
 end;
 
 function TSwaggerRouter.SetDescription(Text: string): TSwaggerRouter;
 begin
   FDescription := Text;
+  ClearCache;
   Result := Self;
 end;
 
 function TSwaggerRouter.SetBasePath(const APath: string): TSwaggerRouter;
 begin
-  FBasePath := Trim(APath);
-  if (not FBasePath.IsEmpty) and (not FBasePath.StartsWith('/')) then
-    FBasePath := '/' + FBasePath;
-  if FBasePath.EndsWith('/') then
-    FBasePath := Copy(FBasePath, Length(FBasePath) - 1);
+  FBasePath := NormalizePathPrefix(APath);
+  if FBasePath = '/' then
+    FBasePath := '';
+  if FBasePath = '/' then
+    FBasePath := '';
+  ClearCache;
   Result := Self;
 end;
 
@@ -1040,6 +1302,7 @@ begin
   if not Name.IsEmpty then FContactObj.Add('name', Name);
   if not Url.IsEmpty then FContactObj.Add('url', Url);
   if not Email.IsEmpty then FContactObj.Add('email', Email);
+  ClearCache;
   Result := Self;
 end;
 
@@ -1049,6 +1312,7 @@ begin
   FLicenseObj.Clear;
   FLicenseObj.Add('name', Name);
   if not Url.IsEmpty then FLicenseObj.Add('url', Url);
+  ClearCache;
   Result := Self;
 end;
 
@@ -1061,12 +1325,14 @@ begin
   if not ADescription.IsEmpty then
     ServerObj.Add('description', ADescription);
   FServers.Add(ServerObj);
+  ClearCache;
   Result := Self;
 end;
 
 function TSwaggerRouter.SetDefaultContentType(Text: string): TSwaggerRouter;
 begin
   FDefaultContentType := Text;
+  ClearCache;
   Result := Self;
 end;
 
@@ -1074,6 +1340,7 @@ function TSwaggerRouter.AddCustomHeader(const AHeader, AValue: string
   ): TSwaggerRouter;
 begin
   FDefaultCustomHeaders.Values[AHeader] := AValue;
+  ClearCache;
   Result := Self;
 end;
 
