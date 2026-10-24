@@ -501,9 +501,15 @@ begin
           with Route do
           begin
             JsonMethod.Add('tags', JsonTags);
-            JsonMethod.Add('summary', Summary);
+            if not Summary.IsEmpty then
+              JsonMethod.Add('summary', Summary)
+            else if not Description.IsEmpty then
+              JsonMethod.Add('summary', Description);
+
             if not Description.IsEmpty then
-              JsonMethod.Add('description', Description);
+              JsonMethod.Add('description', Description)
+            else if not Summary.IsEmpty then
+              JsonMethod.Add('description', Summary);
 
             if not OperationId.IsEmpty then
             begin
