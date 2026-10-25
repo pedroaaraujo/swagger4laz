@@ -18,7 +18,8 @@ type
     rmDelete,
     rmOptions,
     rmHead,
-    rmTrace
+    rmTrace,
+    rmPatch
   );
 
   TParamIn = (
@@ -87,6 +88,7 @@ type
 
   THTTPDocRoute = class(httproute.THTTPRouteCallback)
   private
+    FDocMethod: TRouteMethod;
     FBodyContent: TDocContent;
     FParams: TDocReqParamList;
     FResponses: TResponseList;
@@ -97,7 +99,10 @@ type
     FDeprecated: Boolean;
     FTags: TStrings;
     procedure InvalidateCache;
+  protected
+    procedure DoHandleRequest(ARequest: TRequest; AResponse: TResponse); override;
   public
+    property DocMethod: TRouteMethod read FDocMethod write FDocMethod;
     property Summary: string read FSummary;
     property Description: string read FDescription;
     property OperationId: string read FOperationId;
@@ -134,6 +139,10 @@ type
 
     property Tags: TStrings read FTags;
     function AddTags(ADescription: string): THTTPDocRoute;
+    function AddTag(ADescription: string): THTTPDocRoute;
+    function Tag(ADescription: string): THTTPDocRoute;
+    function SetTag(ADescription: string): THTTPDocRoute;
+    function SetTags(const ATags: array of string): THTTPDocRoute;
     function JsonTags: TJSONArray;
 
     procedure Initialize;
@@ -145,6 +154,11 @@ type
   THTTPRouterHelper = class helper for httproute.THTTPRouter
   public
     function RegisterDocRoute(const APattern: String; AMethod: TRouteMethod; ACallBack: TRouteCallBack; IsDefault: Boolean = False): THTTPDocRoute;
+    function Get(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Post(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Put(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Delete(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Patch(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
   end;
 
   { TSwaggerRouter }
@@ -183,6 +197,7 @@ type
     function Post(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Put(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Delete(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Patch(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
 
     { Model & Enum Registration }
     function RegisterModel(AName: string; AModel: TJSONData): TSwaggerRouter; overload;
@@ -372,6 +387,7 @@ var
   SecurityArr, ServersArray: TJSONArray;
   Pattern, MethodStr, EffectiveBasePath, SortKey, ResponseBody: string;
   Route: THTTPDocRoute;
+  ActualMethod: TRouteMethod;
   RegEx: TRegExpr;
   SL, OperationIds, PathParams: TStringList;
 begin
@@ -553,11 +569,17 @@ begin
             end;
           end;
 
-          case TRouteMethod(Route.Method) of
+          if Route.DocMethod <> rmUnknown then
+            ActualMethod := Route.DocMethod
+          else
+            ActualMethod := TRouteMethod(Route.Method);
+
+          case ActualMethod of
             rmGet: MethodStr := 'get';
             rmPost: MethodStr := 'post';
             rmPut: MethodStr := 'put';
             rmDelete: MethodStr := 'delete';
+            rmPatch: MethodStr := 'patch';
             rmOptions: MethodStr := 'options';
             rmHead: MethodStr := 'head';
             rmTrace: MethodStr := 'trace';
@@ -643,10 +665,43 @@ end;
 function THTTPRouterHelper.RegisterDocRoute(const APattern: String;
   AMethod: TRouteMethod; ACallBack: TRouteCallBack; IsDefault: Boolean
   ): THTTPDocRoute;
+var
+  FPCMethod: httproute.TRouteMethod;
 begin
-  Result := CreateHTTPRoute(THTTPDocRoute, APattern, httproute.TRouteMethod(AMethod), IsDefault) as THTTPDocRoute;
+  if AMethod = rmPatch then
+    FPCMethod := httproute.rmAll
+  else
+    FPCMethod := httproute.TRouteMethod(AMethod);
+
+  Result := CreateHTTPRoute(THTTPDocRoute, APattern, FPCMethod, IsDefault) as THTTPDocRoute;
   Result.Initialize;
+  Result.DocMethod := AMethod;
   THTTPRouteCallback(Result).CallBack := ACallBack;
+end;
+
+function THTTPRouterHelper.Get(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := RegisterDocRoute(APattern, rmGet, ACallBack);
+end;
+
+function THTTPRouterHelper.Post(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := RegisterDocRoute(APattern, rmPost, ACallBack);
+end;
+
+function THTTPRouterHelper.Put(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := RegisterDocRoute(APattern, rmPut, ACallBack);
+end;
+
+function THTTPRouterHelper.Delete(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := RegisterDocRoute(APattern, rmDelete, ACallBack);
+end;
+
+function THTTPRouterHelper.Patch(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := RegisterDocRoute(APattern, rmPatch, ACallBack);
 end;
 
 { TSwaggerComponents }
@@ -710,11 +765,24 @@ end;
 
 procedure THTTPDocRoute.Initialize;
 begin
+  FDocMethod := rmUnknown;
   FResponses := TResponseList.Create(True);
   FParams := TDocReqParamList.Create(True);
   FTags := TStringList.Create;
   FSecurity := ssNone;
   FDeprecated := False;
+end;
+
+procedure THTTPDocRoute.DoHandleRequest(ARequest: TRequest; AResponse: TResponse);
+begin
+  if (FDocMethod = rmPatch) and not SameText(ARequest.Method, 'PATCH') then
+  begin
+    AResponse.Code := 405;
+    AResponse.ContentType := 'application/json';
+    AResponse.Content := '{"error": "Method Not Allowed"}';
+    Exit;
+  end;
+  inherited DoHandleRequest(ARequest, AResponse);
 end;
 
 destructor THTTPDocRoute.Destroy;
@@ -1049,6 +1117,32 @@ begin
   Result := Self;
 end;
 
+function THTTPDocRoute.AddTag(ADescription: string): THTTPDocRoute;
+begin
+  Result := AddTags(ADescription);
+end;
+
+function THTTPDocRoute.Tag(ADescription: string): THTTPDocRoute;
+begin
+  Result := AddTags(ADescription);
+end;
+
+function THTTPDocRoute.SetTag(ADescription: string): THTTPDocRoute;
+begin
+  FTags.Clear;
+  Result := AddTags(ADescription);
+end;
+
+function THTTPDocRoute.SetTags(const ATags: array of string): THTTPDocRoute;
+var
+  I: Integer;
+begin
+  FTags.Clear;
+  for I := Low(ATags) to High(ATags) do
+    AddTags(ATags[I]);
+  Result := Self;
+end;
+
 function THTTPDocRoute.JsonTags: TJSONArray;
 var
   S: string;
@@ -1163,6 +1257,12 @@ function TSwaggerRouter.Delete(const APattern: string; ACallBack: TRouteCallBack
   ): THTTPDocRoute;
 begin
   Result := RegisterRoute(APattern, rmDelete, ACallBack);
+end;
+
+function TSwaggerRouter.Patch(const APattern: string; ACallBack: TRouteCallBack
+  ): THTTPDocRoute;
+begin
+  Result := RegisterRoute(APattern, rmPatch, ACallBack);
 end;
 
 function TSwaggerRouter.RegisterModel(AName: string; AModel: TJSONData

@@ -216,10 +216,11 @@ SwaggerRouter
 
 | Método | Descrição |
 | :--- | :--- |
-| `Get(APattern, ACallBack)` | Registra rota para o verbo HTTP GET |
-| `Post(APattern, ACallBack)` | Registra rota para o verbo HTTP POST |
-| `Put(APattern, ACallBack)` | Registra rota para o verbo HTTP PUT |
-| `Delete(APattern, ACallBack)` | Registra rota para o verbo HTTP DELETE |
+| `Get(APattern, ACallBack)` | Registra rota para o verbo HTTP GET (retorna `THTTPDocRoute`) |
+| `Post(APattern, ACallBack)` | Registra rota para o verbo HTTP POST (retorna `THTTPDocRoute`) |
+| `Put(APattern, ACallBack)` | Registra rota para o verbo HTTP PUT (retorna `THTTPDocRoute`) |
+| `Delete(APattern, ACallBack)` | Registra rota para o verbo HTTP DELETE (retorna `THTTPDocRoute`) |
+| `Patch(APattern, ACallBack)` | Registra rota para o verbo HTTP PATCH (retorna `THTTPDocRoute`) |
 | `SetDocRoute(Endpoint)` | Define a URI do Swagger UI (padrão: `/docs`) |
 | `SetTitle(ATitle)` | Define o título da documentação |
 | `SetVersion(AVersion)` | Define a versão da API |
@@ -234,10 +235,18 @@ SwaggerRouter
 
 | Método | Descrição |
 | :--- | :--- |
-| `SetSummary(Text)` | Define o resumo curto do endpoint |
-| `SetDescription(Text)` | Define a descrição detalhada |
-| `AddTags(Name)` | Adiciona tag para agrupamento visual no Swagger UI |
-| `AddPathParam(Name, Required, Type, Default, Desc)` | Documenta parâmetro presente na URL (`:param`) |
+| `SetSummary(Text)` / `Summary(Text)` | Define o resumo curto do endpoint |
+| `SetDescription(Text)` / `Description(Text)` | Define a descrição detalhada |
+| `AddTags(Name)` / `Tag(Name)` / `Tags(Array)` | Adiciona tag para agrupamento visual no Swagger UI |
+| `SetSecurityBearer` / `SecurityBearer` | Configura autenticação Bearer JWT para a rota |
+| `SetSecurityBasic` / `SecurityBasic` | Configura autenticação Basic Auth para a rota |
+| `SetSecurityApiKey(Name)` / `SecurityApiKey(Name)` | Configura autenticação por API Key no header |
+| `SetSecurityNone` / `SecurityNone` | Define rota explicitamente pública |
+| `AddPathParam(...)` / `PathParam(...)` | Documenta parâmetro presente na URL (`:param`) |
+| `AddQueryParam(...)` / `QueryParam(...)` | Documenta parâmetro de query string (`?param=...`) |
+| `AddHeaderParam(...)` / `HeaderParam(...)` | Documenta parâmetro no header HTTP |
+| `SetBodyContent(...)` / `Body(...)` | Define schema do payload de entrada da requisição |
+| `AddResponse(...)` / `Response(...)` | Documenta códigos HTTP e schemas de retorno |
 | `AddQueryParam(Name, Required, Type, Default, Desc)` | Documenta parâmetro de query string (`?param=valor`) |
 | `AddHeaderParam(Name, Required, Type, Default, Desc)` | Documenta cabeçalho HTTP esperado |
 | `AddEnumParam(Name, Values, Required, ParamIn, ...)` | Documenta parâmetro aceitando valores pré-definidos |
