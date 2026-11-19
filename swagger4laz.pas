@@ -116,6 +116,12 @@ type
     property Responses: TResponseList read FResponses;
     function AddResponse(Code: Integer; ADescription: string = ''; Content: string = ''; ContentType: string = 'application/json'): THTTPDocRoute; overload;
     function AddResponse(Code: string; ADescription: string = ''; Content: string = ''; ContentType: string = 'application/json'): THTTPDocRoute; overload;
+    function AddResponseRef(Code: Integer; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
+    function AddResponseRef(Code: string; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
+    function AddResponseRefArray(Code: Integer; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
+    function AddResponseRefArray(Code: string; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
+    function AddResponseRefPaginated(Code: Integer; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
+    function AddResponseRefPaginated(Code: string; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
     function JsonResponse: TJSONObject;
 
     property Params: TDocReqParamList read FParams;
@@ -128,6 +134,7 @@ type
 
     property BodyContent: TDocContent read FBodyContent;
     function SetBodyContent(Content: string; Required: Boolean = True; ContentType: string = 'application/json'; ADescription: string = ''): THTTPDocRoute;
+    function SetBodyContentRef(const AModelName: string; Required: Boolean = True; const ContentType: string = 'application/json'; const ADescription: string = ''): THTTPDocRoute;
     function JsonBody: TJSONObject;
 
     property Security: TSecurityScheme read FSecurity;
@@ -200,8 +207,13 @@ type
     function Patch(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
 
     { Model & Enum Registration }
+    function HasModel(const AName: string): Boolean;
+    function EnsureModel(const AName: string; AModel: TJSONData): TSwaggerRouter; overload;
+    function EnsureModel(const AName: string; const AModel: string): TSwaggerRouter; overload;
     function RegisterModel(AName: string; AModel: TJSONData): TSwaggerRouter; overload;
     function RegisterModel(AName: string; AModel: string): TSwaggerRouter; overload;
+    function RegisterModel(AName: string; AModel: TJSONData; AOverwrite: Boolean): TSwaggerRouter; overload;
+    function RegisterModel(AName: string; AModel: string; AOverwrite: Boolean): TSwaggerRouter; overload;
     function RegisterEnumModel(AName: string; TypeInfoData: PTypeInfo): TSwaggerRouter; overload;
     function RegisterEnumModel(AName: string; const AValues: array of string): TSwaggerRouter; overload;
 
@@ -305,7 +317,9 @@ end;
 
 function JsonSchemaFromContent(const AContent: string): TJSONData;
 var
-  ContentName, RefName: string;
+  ContentName, CleanModelName, RefName: string;
+  IsArray, IsPaginated: Boolean;
+  ItemRefObj, PropsObj, ArrayObj, PageProp, PageSizeProp, TotalProp, TotalPagesProp: TJSONObject;
 begin
   ContentName := Trim(AContent);
   if ContentName.IsEmpty then
@@ -322,21 +336,99 @@ begin
     Exit;
   end;
 
-  if ContentName.StartsWith('#/components/schemas/') then
-  begin
-    Result := TJSONObject.Create;
-    TJSONObject(Result).Add('$ref', ContentName);
-    Exit;
-  end;
-  if SwaggerRouter.Components.Models.Find(ContentName) = nil then
-    raise Exception.CreateFmt('Schema "%s" não registrado em components/schemas.',
-      [ContentName]);
+  IsArray := False;
+  IsPaginated := False;
 
-  RefName := ContentName;
+  if ContentName.StartsWith('ref:array:', True) then
+  begin
+    IsArray := True;
+    CleanModelName := Copy(ContentName, 11, MaxInt);
+  end
+  else if ContentName.StartsWith('array:', True) then
+  begin
+    IsArray := True;
+    CleanModelName := Copy(ContentName, 7, MaxInt);
+  end
+  else if ContentName.StartsWith('ref:paginated:', True) then
+  begin
+    IsPaginated := True;
+    CleanModelName := Copy(ContentName, 15, MaxInt);
+  end
+  else if ContentName.StartsWith('paginated:', True) then
+  begin
+    IsPaginated := True;
+    CleanModelName := Copy(ContentName, 11, MaxInt);
+  end
+  else if ContentName.StartsWith('ref:', True) then
+  begin
+    CleanModelName := Copy(ContentName, 5, MaxInt);
+  end
+  else
+    CleanModelName := ContentName;
+
+  CleanModelName := Trim(CleanModelName);
+
+  if CleanModelName.StartsWith('#/components/schemas/') then
+    CleanModelName := Copy(CleanModelName, 22, MaxInt);
+
+  // Validação no SwaggerRouter se o router estiver instanciado
+  if Assigned(SwaggerRouter) and (SwaggerRouter.Components.Models.Find(CleanModelName) = nil) then
+    raise Exception.CreateFmt('Schema "%s" não registrado em components/schemas.', [CleanModelName]);
+
+  RefName := CleanModelName;
   RefName := StringReplace(RefName, '~', '~0', [rfReplaceAll]);
   RefName := StringReplace(RefName, '/', '~1', [rfReplaceAll]);
-  Result := TJSONObject.Create;
-  TJSONObject(Result).Add('$ref', '#/components/schemas/' + RefName);
+
+  if IsPaginated then
+  begin
+    Result := TJSONObject.Create;
+    TJSONObject(Result).Add('type', 'object');
+
+    PropsObj := TJSONObject.Create;
+
+    ArrayObj := TJSONObject.Create;
+    ArrayObj.Add('type', 'array');
+    ItemRefObj := TJSONObject.Create;
+    ItemRefObj.Add('$ref', '#/components/schemas/' + RefName);
+    ArrayObj.Add('items', ItemRefObj);
+    PropsObj.Add('items', ArrayObj);
+
+    PageProp := TJSONObject.Create;
+    PageProp.Add('type', 'integer');
+    PageProp.Add('example', 1);
+    PropsObj.Add('page', PageProp);
+
+    PageSizeProp := TJSONObject.Create;
+    PageSizeProp.Add('type', 'integer');
+    PageSizeProp.Add('example', 20);
+    PropsObj.Add('page_size', PageSizeProp);
+
+    TotalProp := TJSONObject.Create;
+    TotalProp.Add('type', 'integer');
+    TotalProp.Add('format', 'int64');
+    TotalProp.Add('example', 100);
+    PropsObj.Add('total_records', TotalProp);
+
+    TotalPagesProp := TJSONObject.Create;
+    TotalPagesProp.Add('type', 'integer');
+    TotalPagesProp.Add('example', 5);
+    PropsObj.Add('total_pages', TotalPagesProp);
+
+    TJSONObject(Result).Add('properties', PropsObj);
+  end
+  else if IsArray then
+  begin
+    Result := TJSONObject.Create;
+    TJSONObject(Result).Add('type', 'array');
+    ItemRefObj := TJSONObject.Create;
+    ItemRefObj.Add('$ref', '#/components/schemas/' + RefName);
+    TJSONObject(Result).Add('items', ItemRefObj);
+  end
+  else
+  begin
+    Result := TJSONObject.Create;
+    TJSONObject(Result).Add('$ref', '#/components/schemas/' + RefName);
+  end;
 end;
 
 function ParameterDefaultJson(const AType, AName, AValue: string): TJSONData;
@@ -391,7 +483,7 @@ var
   RegEx: TRegExpr;
   SL, OperationIds, PathParams: TStringList;
 begin
-  AResp.ContentType := 'application/json';
+  AResp.ContentType := 'application/json; charset=utf-8';
   EffectiveBasePath := SwaggerRouter.ResolveBasePath(AReq);
   SwaggerRouter.FCacheLock.Acquire;
   try
@@ -778,7 +870,7 @@ begin
   if (FDocMethod = rmPatch) and not SameText(ARequest.Method, 'PATCH') then
   begin
     AResponse.Code := 405;
-    AResponse.ContentType := 'application/json';
+    AResponse.ContentType := 'application/json; charset=utf-8';
     AResponse.Content := '{"error": "Method Not Allowed"}';
     Exit;
   end;
@@ -857,6 +949,42 @@ begin
   FResponses.Add(Response);
   InvalidateCache;
   Result := Self;
+end;
+
+function THTTPDocRoute.AddResponseRef(Code: Integer; const AModelName: string;
+  const ADescription: string; const ContentType: string): THTTPDocRoute;
+begin
+  Result := AddResponseRef(Code.ToString, AModelName, ADescription, ContentType);
+end;
+
+function THTTPDocRoute.AddResponseRef(Code: string; const AModelName: string;
+  const ADescription: string; const ContentType: string): THTTPDocRoute;
+begin
+  Result := AddResponse(Code, ADescription, 'ref:' + AModelName, ContentType);
+end;
+
+function THTTPDocRoute.AddResponseRefArray(Code: Integer; const AModelName: string;
+  const ADescription: string; const ContentType: string): THTTPDocRoute;
+begin
+  Result := AddResponseRefArray(Code.ToString, AModelName, ADescription, ContentType);
+end;
+
+function THTTPDocRoute.AddResponseRefArray(Code: string; const AModelName: string;
+  const ADescription: string; const ContentType: string): THTTPDocRoute;
+begin
+  Result := AddResponse(Code, ADescription, 'ref:array:' + AModelName, ContentType);
+end;
+
+function THTTPDocRoute.AddResponseRefPaginated(Code: Integer; const AModelName: string;
+  const ADescription: string; const ContentType: string): THTTPDocRoute;
+begin
+  Result := AddResponseRefPaginated(Code.ToString, AModelName, ADescription, ContentType);
+end;
+
+function THTTPDocRoute.AddResponseRefPaginated(Code: string; const AModelName: string;
+  const ADescription: string; const ContentType: string): THTTPDocRoute;
+begin
+  Result := AddResponse(Code, ADescription, 'ref:paginated:' + AModelName, ContentType);
 end;
 
 function THTTPDocRoute.JsonResponse: TJSONObject;
@@ -1050,6 +1178,12 @@ begin
   Result := Self;
 end;
 
+function THTTPDocRoute.SetBodyContentRef(const AModelName: string;
+  Required: Boolean; const ContentType: string; const ADescription: string): THTTPDocRoute;
+begin
+  Result := SetBodyContent('ref:' + AModelName, Required, ContentType, ADescription);
+end;
+
 function THTTPDocRoute.JsonBody: TJSONObject;
 var
   JBody, JSchema: TJSONObject;
@@ -1197,6 +1331,10 @@ end;
 procedure TSwaggerRouter.HTTPRouterAfterRequest(Sender: TObject;
   ARequest: TRequest; AResponse: TResponse);
 begin
+  if SameText(Trim(AResponse.ContentType), 'application/json') then
+    AResponse.ContentType := 'application/json; charset=utf-8'
+  else if SameText(Trim(AResponse.ContentType), 'application/problem+json') then
+    AResponse.ContentType := 'application/problem+json; charset=utf-8';
 end;
 
 procedure TSwaggerRouter.HTTPRouterBeforeRequest(Sender: TObject;
@@ -1216,7 +1354,7 @@ begin
     SwaggerRouter := TSwaggerRouter.Create;
 
   Result := SwaggerRouter;
-  Result.SetDefaultContentType('application/json');
+  Result.SetDefaultContentType('application/json; charset=utf-8');
   HTTPRouter.BeforeRequest := @Result.HTTPRouterBeforeRequest;
   HTTPRouter.AfterRequest := @Result.HTTPRouterAfterRequest;
 end;
@@ -1265,8 +1403,72 @@ begin
   Result := RegisterRoute(APattern, rmPatch, ACallBack);
 end;
 
-function TSwaggerRouter.RegisterModel(AName: string; AModel: TJSONData
-  ): TSwaggerRouter;
+function TSwaggerRouter.HasModel(const AName: string): Boolean;
+begin
+  FCacheLock.Acquire;
+  try
+    Result := FComponents.Models.Find(AName) <> nil;
+  finally
+    FCacheLock.Release;
+  end;
+end;
+
+function TSwaggerRouter.EnsureModel(const AName: string; AModel: TJSONData): TSwaggerRouter;
+var
+  Existing: TJSONData;
+begin
+  if AName.Trim.IsEmpty then
+  begin
+    if Assigned(AModel) then AModel.Free;
+    raise Exception.Create('Nome do schema não pode ficar vazio.');
+  end;
+  if AModel = nil then
+    raise Exception.CreateFmt('Schema "%s" não pode ser nil.', [AName]);
+  if AModel.JSONType <> jtObject then
+  begin
+    AModel.Free;
+    raise Exception.CreateFmt('Schema "%s" precisa ser um objeto JSON.', [AName]);
+  end;
+
+  FCacheLock.Acquire;
+  try
+    Existing := FComponents.Models.Find(AName);
+    if Existing <> nil then
+    begin
+      // Já registrado: libera AModel e não faz nada (idempotente)
+      AModel.Free;
+    end
+    else
+    begin
+      FComponents.Models.Add(AName, AModel);
+      FDocCache := '';
+      FDocCacheBasePath := '';
+    end;
+  finally
+    FCacheLock.Release;
+  end;
+  Result := Self;
+end;
+
+function TSwaggerRouter.EnsureModel(const AName: string; const AModel: string): TSwaggerRouter;
+var
+  Schema: TJSONData;
+begin
+  if HasModel(AName) then
+    Exit(Self);
+
+  Schema := GetJSON(AModel, False);
+  try
+    Result := EnsureModel(AName, Schema);
+    Schema := nil;
+  finally
+    Schema.Free;
+  end;
+end;
+
+function TSwaggerRouter.RegisterModel(AName: string; AModel: TJSONData; AOverwrite: Boolean): TSwaggerRouter;
+var
+  ExistingIdx: Integer;
 begin
   if AName.Trim.IsEmpty then
     raise Exception.Create('Nome do schema não pode ficar vazio.');
@@ -1276,29 +1478,52 @@ begin
     raise Exception.CreateFmt('Schema "%s" precisa ser um objeto JSON.', [AName]);
   FCacheLock.Acquire;
   try
-    if FComponents.Models.Find(AName) <> nil then
-      raise Exception.CreateFmt('Schema "%s" já foi registrado.', [AName]);
-    FComponents.Models.Add(AName, AModel);
-    FDocCache := '';
-    FDocCacheBasePath := '';
+    ExistingIdx := FComponents.Models.IndexOfName(AName);
+    if ExistingIdx >= 0 then
+    begin
+      if AOverwrite then
+      begin
+        FComponents.Models.Delete(ExistingIdx);
+        FComponents.Models.Add(AName, AModel);
+        FDocCache := '';
+        FDocCacheBasePath := '';
+      end
+      else
+        raise Exception.CreateFmt('Schema "%s" já foi registrado.', [AName]);
+    end
+    else
+    begin
+      FComponents.Models.Add(AName, AModel);
+      FDocCache := '';
+      FDocCacheBasePath := '';
+    end;
   finally
     FCacheLock.Release;
   end;
   Result := Self;
 end;
 
-function TSwaggerRouter.RegisterModel(AName: string; AModel: string
-  ): TSwaggerRouter;
+function TSwaggerRouter.RegisterModel(AName: string; AModel: string; AOverwrite: Boolean): TSwaggerRouter;
 var
   Schema: TJSONData;
 begin
   Schema := GetJSON(AModel, False);
   try
-    Result := RegisterModel(AName, Schema);
+    Result := RegisterModel(AName, Schema, AOverwrite);
     Schema := nil;
   finally
     Schema.Free;
   end;
+end;
+
+function TSwaggerRouter.RegisterModel(AName: string; AModel: TJSONData): TSwaggerRouter;
+begin
+  Result := RegisterModel(AName, AModel, False);
+end;
+
+function TSwaggerRouter.RegisterModel(AName: string; AModel: string): TSwaggerRouter;
+begin
+  Result := RegisterModel(AName, AModel, False);
 end;
 
 function TSwaggerRouter.RegisterEnumModel(AName: string; TypeInfoData: PTypeInfo): TSwaggerRouter;
