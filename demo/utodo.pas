@@ -22,15 +22,18 @@ end;
 initialization
 
 SwaggerRouter
+  .EnsureModel('Todo', '{"type": "object", "properties": {"id": {"type": "integer"}, "title": {"type": "string"}, "completed": {"type": "boolean"}}}');
+
+SwaggerRouter
   .RegisterRoute('todo', rmGet, @GetTodos, False)
-  .AddResponse(200, 'Ok')
-  .SetSummary('Gel all TODOs')
+  .AddResponseRefArray(200, 'Ok', 'Todo')
+  .SetSummary('Get all TODOs')
   .AddTags('Todo');
 
 SwaggerRouter
   .RegisterRoute('todo/:id', rmGet, @GetTodo, False)
-  .AddResponse(200, 'Ok')
-  .SetSummary('Gel todo by ID')
+  .AddResponseRef(200, 'Ok', 'Todo')
+  .SetSummary('Get todo by ID')
   .AddTags('Todo')
   .AddParam('id', 'id');
 
