@@ -195,17 +195,85 @@ Router.Get('/public', @PublicHandler)
 
 ---
 
-### 6. Integração com Modelos (DeltaModel / JSON Schemas)
+### 6. Registro Canônico de Schemas em `components.schemas` e Resolução `$ref`
 
-Você pode registrar schemas de modelos diretamente ou vincular schemas gerados por bibliotecas como o **DeltaModel**:
+O Swagger4Laz implementa um registro centralizado e thread-safe de schemas de componentes em conformidade estrita com o OpenAPI 3.1:
+
+#### A. Registrando Schemas no Router
+
+Você pode registrar schemas de modelos explicitamente ou de forma idempotente:
 
 ```pascal
-// Usando schema gerado por classe do DeltaModel
+// 1. Registro idempotente (EnsureModel): se já existir, não sobrescreve nem lança erro
+SwaggerRouter.EnsureModel('Produto', '{"type": "object", "properties": {"id": {"type": "integer"}, "nome": {"type": "string"}}}');
+
+// 2. Registro estrito (RegisterModel): lança exceção se duplicado, a menos que AOverwrite seja True
+SwaggerRouter.RegisterModel('Categoria', '{"type": "object", "properties": {"descricao": {"type": "string"}}}', True);
+
+// 3. Verificação de existência
+if not SwaggerRouter.HasModel('Produto') then
+  SwaggerRouter.EnsureModel('Produto', ProdutoSchemaJson);
+```
+
+#### B. Resolução de Referências `$ref` em Respostas e Corpos
+
+Ao documentar endpoints, você pode referenciar modelos registrados utilizando sintaxes amigáveis ou ponteiros JSON canônicos:
+
+```pascal
+procedure RegisterProductRoutes;
+begin
+  // 1. Resposta com referência direta ao schema:
+  // Gera: {"schema": {"$ref": "#/components/schemas/Produto"}}
+  SwaggerRouter
+    .Get('/produtos/:id', @GetProduct)
+    .SetSummary('Obter produto por ID')
+    .AddTags('Produtos')
+    .AddPathParam('id', True, 'integer', '1', 'ID do produto')
+    .AddResponse(200, 'Produto localizado', 'ref:Produto'); // ou '#/components/schemas/Produto'
+
+  // 2. Resposta com Array de referências:
+  // Gera: {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Produto"}}}
+  SwaggerRouter
+    .Get('/produtos', @ListProducts)
+    .SetSummary('Listar todos os produtos')
+    .AddTags('Produtos')
+    .AddResponse(200, 'Lista de produtos', 'array:Produto');
+
+  // 3. Resposta com Envelope Paginado de referências:
+  // Gera: {"schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/Produto"}}, "page": ..., "total_records": ...}}}
+  SwaggerRouter
+    .Get('/produtos/paginados', @ListProductsPaginated)
+    .SetSummary('Listar produtos com paginação')
+    .AddTags('Produtos')
+    .AddResponse(200, 'Produtos paginados', 'paginated:Produto');
+end;
+```
+
+#### C. Validação Rigorosa em Runtime
+
+Se uma rota referenciar um modelo não registrado em `components/schemas` (por exemplo, `ref:Inexistente`), o Swagger4Laz lança imediatamente uma exceção explicativa no momento da renderização do documento:
+```
+Exception: Schema "Inexistente" não registrado em components/schemas.
+```
+Isso impede que especificações OpenAPI inválidas ou com referências quebradas sejam servidas para clientes frontend ou ferramentas de integração.
+
+---
+
+### 7. Integração Direta com DeltaModel
+
+Bibliotecas como o **DeltaModel** integram-se nativamente ao Swagger4Laz gerando schemas canônicos e referências sem repetição de código:
+
+```pascal
+// Usando métodos tipados semânticos do DeltaModel:
 SwaggerRouter
-  .Post('/products', @CreateProduct)
+  .Post('/produtos', @CreateProduct)
   .AddTags('Produtos')
-  .SetBodyContent(TProductModel.SwaggerSchema(), True)
-  .AddResponse(201, 'Produto cadastrado', TProductModel.SwaggerSchema());
+  // Request Body com schema de objeto
+  .SetBodyContent(TProductModel.SwaggerSchemaObject(), True)
+  // Response com envelope paginado
+  .AddResponse(200, 'Lista paginada', TProductModel.SwaggerSchemaPaginated())
+  // Response referenciando components.schemas
+  .AddResponse(201, 'Produto cadastrado', TProductModel.SwaggerSchemaRefObject);
 ```
 
 ---
@@ -228,8 +296,11 @@ SwaggerRouter
 | `AddServer(Url, Description)` | Adiciona uma URL de servidor na especificação OpenAPI |
 | `SetBasePath(APath)` | Define o caminho base da API (suporta prefixos de proxy) |
 | `AddCustomHeader(Header, Value)` | Adiciona cabeçalho global às respostas |
-| `RegisterModel(Name, Schema)` | Registra um schema em `components/schemas` |
+| `EnsureModel(Name, Schema)` | Registra um schema em `components/schemas` de forma idempotente (thread-safe) |
+| `RegisterModel(Name, Schema, Overwrite)` | Registra um schema em `components/schemas` com controle de sobrescrita |
+| `HasModel(Name)` | Verifica se um schema já está presente em `components/schemas` |
 | `RegisterEnumModel(Name, Values)` | Registra uma enumeração em `components/schemas` |
+| `ClearCache` | Invalida o cache do documento OpenAPI gerado |
 
 ### `THTTPDocRoute`
 
