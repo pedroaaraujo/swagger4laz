@@ -229,6 +229,7 @@ type
     function SetDefaultContentType(Text: string): TSwaggerRouter;
     function AddCustomHeader(const AHeader, AValue: string): TSwaggerRouter;
     procedure ClearCache;
+    function BuildOpenAPISpecification(const ABasePath: string = ''): string;
 
     constructor Create;
     destructor Destroy; override;
@@ -472,25 +473,24 @@ begin
   end;
 end;
 
-procedure Documentacao(AReq: TRequest; AResp: TResponse);
+function TSwaggerRouter.BuildOpenAPISpecification(const ABasePath: string): string;
 var
   I, J, K, RouteIdx: Integer;
   Json, JsonInfo, JsonPaths, JsonURI, JsonMethod, SecurityItem: TJSONObject;
   SecurityArr, ServersArray: TJSONArray;
-  Pattern, MethodStr, EffectiveBasePath, SortKey, ResponseBody: string;
+  Pattern, MethodStr, EffectiveBasePath, SortKey: string;
   Route: THTTPDocRoute;
   ActualMethod: TRouteMethod;
   RegEx: TRegExpr;
   SL, OperationIds, PathParams: TStringList;
 begin
-  AResp.ContentType := 'application/json; charset=utf-8';
-  EffectiveBasePath := SwaggerRouter.ResolveBasePath(AReq);
-  SwaggerRouter.FCacheLock.Acquire;
+  EffectiveBasePath := ABasePath;
+  FCacheLock.Acquire;
   try
-    if not SwaggerRouter.FDocCache.IsEmpty and
-       (SwaggerRouter.FDocCacheBasePath = EffectiveBasePath) then
+    if not FDocCache.IsEmpty and
+       (FDocCacheBasePath = EffectiveBasePath) then
     begin
-      ResponseBody := SwaggerRouter.FDocCache;
+      Result := FDocCache;
     end
     else
     begin
@@ -695,19 +695,27 @@ begin
         RegEx.Free;
       end;
 
-      Json.Add('components', SwaggerRouter.Components.ToJson);
+      Json.Add('components', Components.ToJson);
 
-      SwaggerRouter.FDocCache := Json.AsJSON;
-      SwaggerRouter.FDocCacheBasePath := EffectiveBasePath;
-      ResponseBody := SwaggerRouter.FDocCache;
+      FDocCache := Json.AsJSON;
+      FDocCacheBasePath := EffectiveBasePath;
+      Result := FDocCache;
       finally
         Json.Free;
       end;
     end;
   finally
-    SwaggerRouter.FCacheLock.Release;
+    FCacheLock.Release;
   end;
-  AResp.Content := ResponseBody;
+end;
+
+procedure Documentacao(AReq: TRequest; AResp: TResponse);
+var
+  EffectiveBasePath: string;
+begin
+  AResp.ContentType := 'application/json; charset=utf-8';
+  EffectiveBasePath := SwaggerRouter.ResolveBasePath(AReq);
+  AResp.Content := SwaggerRouter.BuildOpenAPISpecification(EffectiveBasePath);
   AResp.SendContent;
 end;
 

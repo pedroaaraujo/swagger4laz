@@ -300,6 +300,7 @@ SwaggerRouter
 | `RegisterModel(Name, Schema, Overwrite)` | Registra um schema em `components/schemas` com controle de sobrescrita |
 | `HasModel(Name)` | Verifica se um schema já está presente em `components/schemas` |
 | `RegisterEnumModel(Name, Values)` | Registra uma enumeração em `components/schemas` |
+| `BuildOpenAPISpecification(BasePath)` | Gera a especificação OpenAPI 3.1 completa como string JSON (sem expor HTTP) |
 | `ClearCache` | Invalida o cache do documento OpenAPI gerado |
 
 ### `THTTPDocRoute`
@@ -316,17 +317,38 @@ SwaggerRouter
 | `AddPathParam(...)` / `PathParam(...)` | Documenta parâmetro presente na URL (`:param`) |
 | `AddQueryParam(...)` / `QueryParam(...)` | Documenta parâmetro de query string (`?param=...`) |
 | `AddHeaderParam(...)` / `HeaderParam(...)` | Documenta parâmetro no header HTTP |
-| `SetBodyContent(...)` / `Body(...)` | Define schema do payload de entrada da requisição |
-| `AddResponse(...)` / `Response(...)` | Documenta códigos HTTP e schemas de retorno |
-| `AddQueryParam(Name, Required, Type, Default, Desc)` | Documenta parâmetro de query string (`?param=valor`) |
-| `AddHeaderParam(Name, Required, Type, Default, Desc)` | Documenta cabeçalho HTTP esperado |
 | `AddEnumParam(Name, Values, Required, ParamIn, ...)` | Documenta parâmetro aceitando valores pré-definidos |
-| `SetBodyContent(Schema, Required, ContentType, Desc)` | Define o corpo da requisição (Payload JSON) |
-| `AddResponse(Code, Description, Schema, ContentType)` | Documenta uma resposta HTTP retornada pelo endpoint |
-| `SetSecurityBearer` | Exige token Bearer (JWT) para esta rota |
-| `SetSecurityBasic` | Exige autenticação HTTP Basic para esta rota |
-| `SetSecurityApiKey(HeaderName)` | Exige API Key no cabeçalho especificado |
+| `SetBodyContent(...)` / `Body(...)` | Define schema do payload de entrada da requisição |
+| `SetBodyContentRef(ModelName, Required, ContentType, Desc)` | Define o corpo da requisição apontando diretamente para um `$ref` em `components/schemas` |
+| `AddResponse(...)` / `Response(...)` | Documenta códigos HTTP e schemas de retorno |
+| `AddResponseRef(Code, ModelName, Description, ContentType)` | Documenta resposta referenciando diretamente um schema em `components/schemas` |
+| `AddResponseRefArray(Code, ModelName, Description, ContentType)` | Documenta resposta como array de itens referenciando um schema em `components/schemas` |
+| `AddResponseRefPaginated(Code, ModelName, Description, ContentType)` | Documenta resposta com envelope paginado padrão referenciando itens em `components/schemas` |
 | `SetDeprecated(Value)` | Marca o endpoint como obsoleto no Swagger UI |
+
+---
+
+## 🧪 Suíte de Testes Automatizados
+
+O Swagger4Laz disponibiliza uma suíte automatizada de testes unitários em `demo/test_swagger.lpr` cobrindo 100% dos fluxos de registro e resolução de schemas OpenAPI 3.1:
+
+- **Idempotência**: `EnsureModel` não duplica registros nem lança exceções ao registrar o mesmo modelo repetidamente.
+- **Validação de Existência**: `HasModel` reflete fielmente o estado do dicionário `components/schemas`.
+- **Resolução de `$ref`**:
+  - `ref:NomeModelo` e `#/components/schemas/NomeModelo` geram `{"$ref": "#/components/schemas/NomeModelo"}`.
+  - `array:NomeModelo` e `ref:array:NomeModelo` geram `{"type": "array", "items": {"$ref": "#/components/schemas/NomeModelo"}}`.
+  - `paginated:NomeModelo` e `ref:paginated:NomeModelo` geram envelopes canônicos com metadados e referências.
+- **Métodos Semânticos da Rota**: `AddResponseRef`, `AddResponseRefArray`, `AddResponseRefPaginated` e `SetBodyContentRef`.
+- **Geração JSON**: `BuildOpenAPISpecification` emite documento JSON válido e sem falhas de sintaxe.
+- **Detecção de Quebra de Contrato**: Validação estrita que lança exceção em tempo de compilação/execução caso uma rota aponte para um modelo inexistente em `components/schemas`.
+
+### Executando os testes:
+
+```bash
+cd demo
+fpc -B -FE. -FUlib -Fu.. test_swagger.lpr
+./test_swagger
+```
 
 ---
 

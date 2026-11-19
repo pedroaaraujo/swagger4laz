@@ -26,13 +26,13 @@ SwaggerRouter
 
 SwaggerRouter
   .RegisterRoute('todo', rmGet, @GetTodos, False)
-  .AddResponseRefArray(200, 'Ok', 'Todo')
+  .AddResponseRefArray(200, 'Todo', 'Ok')
   .SetSummary('Get all TODOs')
   .AddTags('Todo');
 
 SwaggerRouter
   .RegisterRoute('todo/:id', rmGet, @GetTodo, False)
-  .AddResponseRef(200, 'Ok', 'Todo')
+  .AddResponseRef(200, 'Todo', 'Ok')
   .SetSummary('Get todo by ID')
   .AddTags('Todo')
   .AddParam('id', 'id');
