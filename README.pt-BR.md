@@ -9,7 +9,7 @@
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-brightgreen.svg)](https://swagger.io/specification/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Swagger4Laz é uma biblioteca de documentação OpenAPI 3.1 e roteador com Swagger UI embutido para Free Pascal e Lazarus. Ela estende o `httproute.THTTPRouter` nativo do FPC para declarar rotas tipadas, esquemas de dados, parâmetros de requisição, envelopes de resposta e tratamento de erros via API fluente em Pascal.
+Swagger4Laz é uma biblioteca de documentação OpenAPI 3.1 e roteador com Swagger UI embutido para Free Pascal e Lazarus. Ela estende o `httproute.THTTPRouter` nativo do FPC para declarar rotas tipadas, esquemas de dados, parâmetros de requisição, envelopes de resposta, negociação multi-formato (JSON, CBOR, BSON, XML, CSV) e erros no padrão RFC 7807 via API fluente em Pascal.
 
 ---
 
@@ -19,6 +19,7 @@ Swagger4Laz é uma biblioteca de documentação OpenAPI 3.1 e roteador com Swagg
 - **IDE / Ferramental**: Lazarus >= 3.0 (`lazbuild`).
 - **Sistemas Operacionais**: Linux (x86_64, aarch64), Windows (x86_64, i386), macOS (x86_64, arm64).
 - **Padrões Suportados**: OpenAPI 3.1.0 e RFC 7807 (Problem Details for HTTP APIs).
+- **Media Types Suportados**: `application/json`, `application/cbor`, `application/bson`, `application/xml`, `text/xml`, `text/csv`, `application/x-www-form-urlencoded`, `multipart/form-data`.
 - **Dependências Internas**: `httproute`, `fpjson`, `jsonparser`, `fgl`, `TypInfo`. Sem dependência de bibliotecas C externas.
 
 ---
@@ -164,11 +165,22 @@ SwaggerRouter.Get('/api/v1/busca/:categoria', @HandleBusca)
 
 ---
 
-## Corpo da Requisição (Payload)
+## Corpo da Requisição (Payload Multi-Formato)
+
+Declare formatos de entrada esperados para JSON, formatos binários (CBOR, BSON), XML e formulários:
 
 ```pascal
-// Payload JSON referenciando components.schemas/ProdutoInput
-Route.ConsumesJson('ProdutoInput', True, 'Dados do produto');
+// Payload JSON padrão referenciando components.schemas/ProdutoInput
+Route.ConsumesJson('ProdutoInput', True, 'Dados do produto em JSON');
+
+// Payload binário CBOR (RFC 8949)
+Route.SetBodyContentRef('ProdutoInput', True, 'application/cbor', 'Payload binário CBOR');
+
+// Payload binário BSON (v1.1)
+Route.SetBodyContentRef('ProdutoInput', True, 'application/bson', 'Documento binário BSON');
+
+// Payload XML corporativo
+Route.SetBodyContentRef('ProdutoInput', True, 'application/xml', 'Documento XML');
 
 // Dados codificados em formulário padrão (application/x-www-form-urlencoded)
 Route.ConsumesFormData('Formulário de login');
@@ -179,13 +191,21 @@ Route.ConsumesMultipart('Upload de arquivos e anexos');
 
 ---
 
-## Definição de Respostas
+## Definição de Respostas & Negociação Multi-Formato
 
-Métodos diretos para respostas padrão OpenAPI:
+O Swagger4Laz permite mapear múltiplas representações sob o mesmo código de status HTTP, viabilizando documentação OpenAPI 3.1 precisa para endpoints com negociação de conteúdo via cabeçalho `Accept`:
 
 ```pascal
-// Referência a objeto único ($ref: #/components/schemas/Produto)
+// Referência a objeto único em JSON (padrão)
 Route.Produces(200, 'Produto', 'Operação realizada com sucesso');
+
+// Definições de respostas multi-formato:
+Route
+  .AddResponseRef(200, 'Produto', 'Resposta padrão em JSON', 'application/json')
+  .AddResponseRef(200, 'Produto', 'Payload binário CBOR de alta taxa', 'application/cbor')
+  .AddResponseRef(200, 'Produto', 'Documento binário BSON', 'application/bson')
+  .AddResponseRef(200, 'Produto', 'Documento XML enterprise', 'application/xml')
+  .AddResponseRefArray(200, 'Produto', 'Exportação tabular em CSV', 'text/csv');
 
 // Lista simples: { type: "array", items: { $ref: #/components/schemas/Produto } }
 Route.ProducesArray(200, 'Produto', 'Lista de produtos');
@@ -196,6 +216,16 @@ Route.ProducesPaginated(200, 'Produto', 'Resposta paginada');
 // Resposta sem conteúdo (HTTP 204)
 Route.ProducesEmpty(204, 'Registro excluído');
 ```
+
+### Panorama de Tradeoffs dos Media Types
+
+| Media Type | Payload vs JSON | Contexto Ideal | Características Principais |
+| :--- | :--- | :--- | :--- |
+| `application/json` | Linha de base (100%) | Web SPAs, clientes JavaScript | Compatibilidade universal, legível por humanos |
+| `application/cbor` | ~40-60% menor | Mobile (Flutter), IoT, microsserviços | Binário compacto, floats IEEE 754, parsing Zero-DOM |
+| `application/bson` | Comparável | Bancos documentais, workers analíticos | Prefixo de tamanho de 32 bits, tipos ricos, UTC ms |
+| `text/csv` | Compacto para tabelas | Exportações em lote, analytics | Registros tabulares RFC 4180, pronto para planilhas |
+| `application/xml` | ~20-40% maior | Enterprise legado, compliance fiscal | Validação estrita W3C, escape canônico de entidades |
 
 ---
 

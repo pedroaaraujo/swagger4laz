@@ -9,7 +9,7 @@
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-brightgreen.svg)](https://swagger.io/specification/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Swagger4Laz is an OpenAPI 3.1 specification builder and embedded Swagger UI router for Free Pascal and Lazarus. It extends the native `httproute.THTTPRouter` to declare typed API routes, schemas, request parameters, response envelopes, and error objects using a fluent Pascal API.
+Swagger4Laz is an OpenAPI 3.1 specification builder and embedded Swagger UI router for Free Pascal and Lazarus. It extends the native `httproute.THTTPRouter` to declare typed API routes, schemas, request parameters, response envelopes, multi-format content negotiation (JSON, CBOR, BSON, XML, CSV), and RFC 7807 problem details using a fluent Pascal API.
 
 ---
 
@@ -19,6 +19,7 @@ Swagger4Laz is an OpenAPI 3.1 specification builder and embedded Swagger UI rout
 - **IDE / Tooling**: Lazarus >= 3.0 (`lazbuild`).
 - **Operating Systems**: Linux (x86_64, aarch64), Windows (x86_64, i386), macOS (x86_64, arm64).
 - **Specification Standard**: OpenAPI 3.1.0 and RFC 7807 (Problem Details for HTTP APIs).
+- **Supported Media Types**: `application/json`, `application/cbor`, `application/bson`, `application/xml`, `text/xml`, `text/csv`, `application/x-www-form-urlencoded`, `multipart/form-data`.
 - **Core Dependencies**: `httproute`, `fpjson`, `jsonparser`, `fgl`, `TypInfo`. No external C library bindings required.
 
 ---
@@ -164,13 +165,24 @@ SwaggerRouter.Get('/api/v1/search/:category', @HandleSearch)
 
 ---
 
-## Request Body Declarations
+## Request Body Declarations (Multi-Format)
+
+Declare expected input payloads for JSON, binary formats (CBOR, BSON), XML, and form uploads:
 
 ```pascal
-// JSON payload referencing components.schemas/ProductInput
-Route.ConsumesJson('ProductInput', True, 'Product data');
+// Standard JSON payload referencing components.schemas/ProductInput
+Route.ConsumesJson('ProductInput', True, 'JSON product payload');
 
-// Standard form-data payload (application/x-www-form-urlencoded)
+// Binary CBOR payload (RFC 8949)
+Route.SetBodyContentRef('ProductInput', True, 'application/cbor', 'Binary CBOR payload');
+
+// Binary BSON payload (v1.1)
+Route.SetBodyContentRef('ProductInput', True, 'application/bson', 'Binary BSON document');
+
+// XML payload
+Route.SetBodyContentRef('ProductInput', True, 'application/xml', 'XML document payload');
+
+// Form data payload (application/x-www-form-urlencoded)
 Route.ConsumesFormData('User login form');
 
 // Multipart payload for file uploads (multipart/form-data)
@@ -179,13 +191,21 @@ Route.ConsumesMultipart('File attachment payload');
 
 ---
 
-## Response Definitions
+## Response Definitions & Multi-Format Negotiation
 
-Swagger4Laz provides shorthand builders for canonical OpenAPI responses:
+Swagger4Laz models multiple representations under the same HTTP status code, enabling accurate OpenAPI 3.1 documentation for endpoints supporting content negotiation (`Accept` header):
 
 ```pascal
-// Single object reference ($ref: #/components/schemas/Product)
+// Single object reference in JSON (default)
 Route.Produces(200, 'Product', 'Operation succeeded');
+
+// Multi-format response definitions:
+Route
+  .AddResponseRef(200, 'Product', 'Standard JSON response', 'application/json')
+  .AddResponseRef(200, 'Product', 'High-throughput binary CBOR', 'application/cbor')
+  .AddResponseRef(200, 'Product', 'Document binary BSON', 'application/bson')
+  .AddResponseRef(200, 'Product', 'Enterprise XML document', 'application/xml')
+  .AddResponseRefArray(200, 'Product', 'Tabular CSV report export', 'text/csv');
 
 // Array response: { type: "array", items: { $ref: #/components/schemas/Product } }
 Route.ProducesArray(200, 'Product', 'List of products');
@@ -196,6 +216,16 @@ Route.ProducesPaginated(200, 'Product', 'Paginated response');
 // No-content response (HTTP 204)
 Route.ProducesEmpty(204, 'Entity deleted');
 ```
+
+### Media Types Tradeoffs Overview
+
+| Media Type | Payload vs JSON | Ideal Context | Key Characteristics |
+| :--- | :--- | :--- | :--- |
+| `application/json` | Baseline (100%) | Web SPAs, JavaScript clients | Universal browser compatibility, human-readable |
+| `application/cbor` | ~40-60% smaller | Mobile (Flutter), IoT, microservices | Compact binary, IEEE 754 floats, Zero-DOM parsing |
+| `application/bson` | Comparable | Document storage, analytical workers | 32-bit length prefix, rich types, UTC datetime ms |
+| `text/csv` | Compact for flat tables | Bulk exports, reporting, analytics | RFC 4180 tabular records, spreadsheet ready |
+| `application/xml` | ~20-40% larger | Enterprise legacy, fiscal compliance | W3C strict validation, entity escaping |
 
 ---
 

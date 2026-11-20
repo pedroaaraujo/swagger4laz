@@ -9,7 +9,7 @@
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-brightgreen.svg)](https://swagger.io/specification/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Swagger4Laz es una biblioteca de documentación OpenAPI 3.1 y enrutador con Swagger UI integrado para Free Pascal y Lazarus. Extiende el componente `httproute.THTTPRouter` nativo de FPC para declarar rutas tipadas, esquemas de datos, parámetros de solicitud, envoltorios de respuesta y gestión de errores mediante una API fluida en Pascal.
+Swagger4Laz es una biblioteca de documentación OpenAPI 3.1 y enrutador con Swagger UI integrado para Free Pascal y Lazarus. Extiende el componente `httproute.THTTPRouter` nativo de FPC para declarar rutas tipadas, esquemas de datos, parámetros de solicitud, envoltorios de respuesta, negociación multiformato (JSON, CBOR, BSON, XML, CSV) y gestión de errores bajo la especificación RFC 7807 mediante una API fluida en Pascal.
 
 ---
 
@@ -19,6 +19,7 @@ Swagger4Laz es una biblioteca de documentación OpenAPI 3.1 y enrutador con Swag
 - **IDE / Herramientas**: Lazarus >= 3.0 (`lazbuild`).
 - **Sistemas Operativos**: Linux (x86_64, aarch64), Windows (x86_64, i386), macOS (x86_64, arm64).
 - **Estándares Compatibles**: OpenAPI 3.1.0 y RFC 7807 (Problem Details for HTTP APIs).
+- **Media Types Compatibles**: `application/json`, `application/cbor`, `application/bson`, `application/xml`, `text/xml`, `text/csv`, `application/x-www-form-urlencoded`, `multipart/form-data`.
 - **Dependencias Internas**: `httproute`, `fpjson`, `jsonparser`, `fgl`, `TypInfo`. Sin dependencias de bibliotecas externas en C.
 
 ---
@@ -60,7 +61,7 @@ begin
 end;
 
 begin
-  // Metadatos de OpenAPI
+  // Metadados de OpenAPI
   SwaggerRouter
     .SetTitle('API de Usuarios')
     .SetVersion('1.0.0')
@@ -164,11 +165,22 @@ SwaggerRouter.Get('/api/v1/busqueda/:categoria', @HandleBusqueda)
 
 ---
 
-## Cuerpo de la Solicitud (Payload)
+## Cuerpo de la Solicitud (Payload Multiformato)
+
+Declare formatos de entrada previstos para JSON, formatos binarios (CBOR, BSON), XML y formularios:
 
 ```pascal
-// Payload JSON referenciando components.schemas/ProductoInput
-Route.ConsumesJson('ProductoInput', True, 'Datos del producto');
+// Payload JSON estándar referenciando components.schemas/ProductoInput
+Route.ConsumesJson('ProductoInput', True, 'Datos del producto en JSON');
+
+// Payload binario CBOR (RFC 8949)
+Route.SetBodyContentRef('ProductoInput', True, 'application/cbor', 'Payload binario CBOR');
+
+// Payload binario BSON (v1.1)
+Route.SetBodyContentRef('ProductoInput', True, 'application/bson', 'Documento binario BSON');
+
+// Payload XML corporativo
+Route.SetBodyContentRef('ProductoInput', True, 'application/xml', 'Documento XML');
 
 // Datos en formulario estándar (application/x-www-form-urlencoded)
 Route.ConsumesFormData('Formulario de inicio de sesión');
@@ -179,13 +191,21 @@ Route.ConsumesMultipart('Subida de archivos adjuntos');
 
 ---
 
-## Definición de Respuestas
+## Definición de Respuestas y Negociación Multiformato
 
-Métodos directos para respuestas canónicas de OpenAPI:
+Swagger4Laz permite vincular múltiples representaciones bajo el mismo código de estado HTTP, permitiendo una documentación OpenAPI 3.1 rigurosa para endpoints con negociación de contenido vía cabecera `Accept`:
 
 ```pascal
-// Referencia a objeto único ($ref: #/components/schemas/Producto)
+// Referencia a objeto único en JSON (predeterminado)
 Route.Produces(200, 'Producto', 'Operación ejecutada con éxito');
+
+// Definiciones de respuestas multiformato:
+Route
+  .AddResponseRef(200, 'Producto', 'Respuesta estándar en JSON', 'application/json')
+  .AddResponseRef(200, 'Producto', 'Payload binario CBOR de alto rendimiento', 'application/cbor')
+  .AddResponseRef(200, 'Producto', 'Documento binario BSON', 'application/bson')
+  .AddResponseRef(200, 'Producto', 'Documento XML corporativo', 'application/xml')
+  .AddResponseRefArray(200, 'Producto', 'Exportación tabular en CSV', 'text/csv');
 
 // Lista simple: { type: "array", items: { $ref: #/components/schemas/Producto } }
 Route.ProducesArray(200, 'Producto', 'Lista de productos');
@@ -196,6 +216,16 @@ Route.ProducesPaginated(200, 'Producto', 'Respuesta paginada');
 // Respuesta sin contenido (HTTP 204)
 Route.ProducesEmpty(204, 'Registro eliminado');
 ```
+
+### Panorama de Tradeoffs de Media Types
+
+| Media Type | Payload vs JSON | Contexto Ideal | Características Clave |
+| :--- | :--- | :--- | :--- |
+| `application/json` | Línea de base (100%) | Web SPAs, clientes JavaScript | Compatibilidad universal, legible por personas |
+| `application/cbor` | ~40-60% menor | Móvil (Flutter), IoT, microservicios | Binario compacto, floats IEEE 754, parsing Zero-DOM |
+| `application/bson` | Comparable | Bases documentales, workers analíticos | Prefijo de tamaño de 32 bits, tipos ricos, UTC ms |
+| `text/csv` | Compacto para tablas | Exportaciones masivas, analítica | Registros tabulares RFC 4180, directo a hojas de cálculo |
+| `application/xml` | ~20-40% mayor | Enterprise heredado, cumplimiento fiscal | Validación estricta W3C, escape de entidades |
 
 ---
 
@@ -270,6 +300,6 @@ HTTPRouter.RegisterRoute('/api/docs', rmGet, @SwaggerUI);
 
 ---
 
-## Licencia
+## Licença
 
 Distribuido bajo la licencia MIT. Consulte el archivo [LICENSE](LICENSE) para más detalles.

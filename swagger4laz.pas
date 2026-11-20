@@ -108,11 +108,13 @@ type
   public
     property DocMethod: TRouteMethod read FDocMethod write FDocMethod;
     property Path: string read GetPath;
-    property Summary: string read FSummary;
-    property Description: string read FDescription;
     property OperationId: string read FOperationId;
     property IsDeprecated: Boolean read FDeprecated;
 
+    function Summary: string; overload;
+    function Summary(Text: string): THTTPDocRoute; overload;
+    function Description: string; overload;
+    function Description(Text: string): THTTPDocRoute; overload;
     function SetSummary(Text: string): THTTPDocRoute;
     function SetDescription(Text: string): THTTPDocRoute;
     function SetOperationId(AId: string): THTTPDocRoute;
@@ -1323,6 +1325,26 @@ procedure THTTPDocRoute.InvalidateCache;
 begin
   if SwaggerRouter <> nil then
     SwaggerRouter.ClearCache;
+end;
+
+function THTTPDocRoute.Summary: string;
+begin
+  Result := FSummary;
+end;
+
+function THTTPDocRoute.Summary(Text: string): THTTPDocRoute;
+begin
+  Result := SetSummary(Text);
+end;
+
+function THTTPDocRoute.Description: string;
+begin
+  Result := FDescription;
+end;
+
+function THTTPDocRoute.Description(Text: string): THTTPDocRoute;
+begin
+  Result := SetDescription(Text);
 end;
 
 function THTTPDocRoute.SetSummary(Text: string): THTTPDocRoute;
