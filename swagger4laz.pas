@@ -5,9 +5,12 @@ unit swagger4laz;
 interface
 
 uses
-  Classes, SysUtils, StrUtils, syncobjs, httproute, HTTPDefs, RegExpr, fpjson, jsonparser, fgl, Variants, TypInfo;
+  Classes, SysUtils, StrUtils, syncobjs, contnrs, httproute, HTTPDefs, RegExpr, fpjson, jsonparser, fgl, Variants, TypInfo;
 
 type
+  TSwaggerRouter = class;
+  THTTPDocRoute = class;
+  TSwaggerRouteGroup = class;
 
   TRouteMethod = (
     rmUnknown,
@@ -98,11 +101,13 @@ type
     FOperationId: string;
     FDeprecated: Boolean;
     FTags: TStrings;
+    function GetPath: string;
     procedure InvalidateCache;
   protected
     procedure DoHandleRequest(ARequest: TRequest; AResponse: TResponse); override;
   public
     property DocMethod: TRouteMethod read FDocMethod write FDocMethod;
+    property Path: string read GetPath;
     property Summary: string read FSummary;
     property Description: string read FDescription;
     property OperationId: string read FOperationId;
@@ -122,6 +127,8 @@ type
     function AddResponseRefArray(Code: string; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
     function AddResponseRefPaginated(Code: Integer; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
     function AddResponseRefPaginated(Code: string; const AModelName: string; const ADescription: string = ''; const ContentType: string = 'application/json'): THTTPDocRoute; overload;
+    function FindResponse(const ACode: string): TDocResponse; overload;
+    function FindResponse(ACode: Integer): TDocResponse; overload;
     function JsonResponse: TJSONObject;
 
     property Params: TDocReqParamList read FParams;
@@ -130,6 +137,7 @@ type
     function AddPathParam(AName: string; Required: Boolean = True; ParamType: string = 'string'; DefaultValue: string = ''; ADescription: string = ''): THTTPDocRoute;
     function AddQueryParam(AName: string; Required: Boolean = False; ParamType: string = 'string'; DefaultValue: string = ''; ADescription: string = ''): THTTPDocRoute;
     function AddHeaderParam(AName: string; Required: Boolean = False; ParamType: string = 'string'; DefaultValue: string = ''; ADescription: string = ''): THTTPDocRoute;
+    function FindParam(const AName: string): TDocReqParam;
     function JsonParams: TJSONArray;
 
     property BodyContent: TDocContent read FBodyContent;
@@ -144,6 +152,33 @@ type
     function SetSecurityApiKey(HeaderName: string = 'X-API-Key'): THTTPDocRoute;
     function SetSecurityNone: THTTPDocRoute;
 
+    { Fluent Semantic Chaining }
+    function Produces(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute;
+    function ProducesArray(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute;
+    function ProducesPaginated(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute;
+    function ProducesEmpty(Code: Integer = 204; const ADescription: string = ''): THTTPDocRoute;
+    function Consumes(const AModelName: string; Required: Boolean = True; const ADescription: string = 'Payload'): THTTPDocRoute;
+    function ConsumesJson(const AModelName: string; Required: Boolean = True; const ADescription: string = 'JSON Payload'): THTTPDocRoute;
+    function ConsumesFormData(const ADescription: string = 'Form Data Payload'): THTTPDocRoute;
+    function ConsumesMultipart(const ADescription: string = 'Multipart Form Payload'): THTTPDocRoute;
+
+    { RFC 7807 Problem Details }
+    function ProducesProblem(ACode: Integer): THTTPDocRoute; overload;
+    function ProducesProblem(const ACodes: array of Integer): THTTPDocRoute; overload;
+    function ProducesStandardProblems: THTTPDocRoute;
+
+    { Concise Parameter Helpers }
+    function QueryParam(const AName: string; const AType: string = 'string'; const ADefault: string = ''; const ADescription: string = ''): THTTPDocRoute;
+    function PathParam(const AName: string; const AType: string = 'integer'; const ADescription: string = ''): THTTPDocRoute;
+    function HeaderParam(const AName: string; const AType: string = 'string'; Required: Boolean = False; const ADescription: string = ''): THTTPDocRoute;
+    function EnumParam(const AName: string; const AValues: array of string; const ADescription: string = ''): THTTPDocRoute;
+
+    { Fluent Security Shortcuts }
+    function SecurityBearer: THTTPDocRoute;
+    function SecurityBasic: THTTPDocRoute;
+    function SecurityApiKey(const AHeader: string = 'X-API-Key'): THTTPDocRoute;
+    function SecurityNone: THTTPDocRoute;
+
     property Tags: TStrings read FTags;
     function AddTags(ADescription: string): THTTPDocRoute;
     function AddTag(ADescription: string): THTTPDocRoute;
@@ -156,6 +191,44 @@ type
     destructor Destroy; override;
   end;
 
+  { TSwaggerRouteGroup }
+
+  TSwaggerRouteGroup = class
+  private
+    FRouter: TSwaggerRouter;
+    FPrefix: string;
+    FTag: string;
+    FSecurity: TSecurityScheme;
+    FApiKeyHeader: string;
+    FHasSecurity: Boolean;
+    FProblemCodes: array of Integer;
+    function CombinePath(const ASubPattern: string): string;
+    function ApplyGroupSettings(ARoute: THTTPDocRoute): THTTPDocRoute;
+  public
+    constructor Create(ARouter: TSwaggerRouter; const APrefix: string);
+
+    property Prefix: string read FPrefix;
+    property CurrentTag: string read FTag;
+
+    function Tag(const ATag: string): TSwaggerRouteGroup;
+    function Security(AScheme: TSecurityScheme): TSwaggerRouteGroup;
+    function SecurityBearer: TSwaggerRouteGroup;
+    function SecurityBasic: TSwaggerRouteGroup;
+    function SecurityApiKey(const AHeader: string = 'X-API-Key'): TSwaggerRouteGroup;
+    function SecurityNone: TSwaggerRouteGroup;
+
+    function Problem(ACode: Integer): TSwaggerRouteGroup;
+    function StandardProblems: TSwaggerRouteGroup;
+
+    function Get(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Post(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Put(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Delete(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Patch(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Options(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Head(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+  end;
+
   { THTTPRouterHelper }
 
   THTTPRouterHelper = class helper for httproute.THTTPRouter
@@ -166,6 +239,8 @@ type
     function Put(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Delete(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Patch(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Options(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Head(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
   end;
 
   { TSwaggerRouter }
@@ -186,6 +261,7 @@ type
     FDocCache: string;
     FDocCacheBasePath: string;
     FCacheLock: TCriticalSection;
+    FGroups: TFPObjectList;
     procedure HTTPRouterAfterRequest(Sender: TObject; ARequest: TRequest; AResponse: TResponse);
     procedure HTTPRouterBeforeRequest(Sender: TObject; ARequest: TRequest; AResponse: TResponse);
     function ResolveBasePath(AReq: TRequest): string;
@@ -205,6 +281,9 @@ type
     function Put(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Delete(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Patch(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Options(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Head(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+    function Group(const APrefix: string): TSwaggerRouteGroup;
 
     { Model & Enum Registration }
     function HasModel(const AName: string): Boolean;
@@ -1132,6 +1211,16 @@ begin
   Result := RegisterDocRoute(APattern, rmPatch, ACallBack);
 end;
 
+function THTTPRouterHelper.Options(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := RegisterDocRoute(APattern, rmOptions, ACallBack);
+end;
+
+function THTTPRouterHelper.Head(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := RegisterDocRoute(APattern, rmHead, ACallBack);
+end;
+
 { TSwaggerComponents }
 
 constructor TSwaggerComponents.Create;
@@ -1190,6 +1279,15 @@ begin
 end;
 
 { THTTPDocRoute }
+
+function THTTPDocRoute.GetPath: string;
+begin
+  Result := URLPattern;
+  if not Result.StartsWith('/') then
+    Result := '/' + Result;
+  if (Length(Result) > 1) and Result.EndsWith('/') then
+    Result := Copy(Result, 1, Length(Result) - 1);
+end;
 
 procedure THTTPDocRoute.Initialize;
 begin
@@ -1323,6 +1421,21 @@ begin
   Result := AddResponse(Code, ADescription, 'ref:paginated:' + AModelName, ContentType);
 end;
 
+function THTTPDocRoute.FindResponse(const ACode: string): TDocResponse;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to FResponses.Count - 1 do
+    if SameText(FResponses[I].Code, ACode) then
+      Exit(FResponses[I]);
+end;
+
+function THTTPDocRoute.FindResponse(ACode: Integer): TDocResponse;
+begin
+  Result := FindResponse(ACode.ToString);
+end;
+
 function THTTPDocRoute.JsonResponse: TJSONObject;
 var
   R: TDocResponse;
@@ -1446,6 +1559,16 @@ function THTTPDocRoute.AddHeaderParam(AName: string; Required: Boolean;
   ParamType: string; DefaultValue: string; ADescription: string): THTTPDocRoute;
 begin
   Result := AddParam(AName, AName, Required, piHeader, ParamType, DefaultValue, ADescription);
+end;
+
+function THTTPDocRoute.FindParam(const AName: string): TDocReqParam;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to FParams.Count - 1 do
+    if SameText(FParams[I].Name, AName) then
+      Exit(FParams[I]);
 end;
 
 function THTTPDocRoute.JsonParams: TJSONArray;
@@ -1580,6 +1703,142 @@ begin
   Result := SetSecurity(ssNone);
 end;
 
+function GetDefaultProblemDescription(ACode: Integer): string;
+begin
+  case ACode of
+    400: Result := 'Bad Request';
+    401: Result := 'Unauthorized';
+    403: Result := 'Forbidden';
+    404: Result := 'Not Found';
+    405: Result := 'Method Not Allowed';
+    409: Result := 'Conflict';
+    422: Result := 'Unprocessable Entity';
+    429: Result := 'Too Many Requests';
+    500: Result := 'Internal Server Error';
+    502: Result := 'Bad Gateway';
+    503: Result := 'Service Unavailable';
+  else
+    Result := 'Problem Details';
+  end;
+end;
+
+function THTTPDocRoute.Produces(Code: Integer; const AModelName: string; const ADescription: string): THTTPDocRoute;
+begin
+  Result := AddResponseRef(Code, AModelName, ADescription);
+end;
+
+function THTTPDocRoute.ProducesArray(Code: Integer; const AModelName: string; const ADescription: string): THTTPDocRoute;
+begin
+  Result := AddResponseRefArray(Code, AModelName, ADescription);
+end;
+
+function THTTPDocRoute.ProducesPaginated(Code: Integer; const AModelName: string; const ADescription: string): THTTPDocRoute;
+begin
+  Result := AddResponseRefPaginated(Code, AModelName, ADescription);
+end;
+
+function THTTPDocRoute.ProducesEmpty(Code: Integer; const ADescription: string): THTTPDocRoute;
+var
+  Desc: string;
+begin
+  Desc := ADescription;
+  if Desc.IsEmpty then
+  begin
+    if Code = 204 then
+      Desc := 'No Content'
+    else
+      Desc := 'Success';
+  end;
+  Result := AddResponse(Code, Desc, '', 'application/json');
+end;
+
+function THTTPDocRoute.Consumes(const AModelName: string; Required: Boolean; const ADescription: string): THTTPDocRoute;
+begin
+  Result := SetBodyContentRef(AModelName, Required, 'application/json', ADescription);
+end;
+
+function THTTPDocRoute.ConsumesJson(const AModelName: string; Required: Boolean; const ADescription: string): THTTPDocRoute;
+begin
+  Result := SetBodyContentRef(AModelName, Required, 'application/json', ADescription);
+end;
+
+function THTTPDocRoute.ConsumesFormData(const ADescription: string): THTTPDocRoute;
+begin
+  Result := SetBodyContent('', True, 'application/x-www-form-urlencoded', ADescription);
+end;
+
+function THTTPDocRoute.ConsumesMultipart(const ADescription: string): THTTPDocRoute;
+begin
+  Result := SetBodyContent('', True, 'multipart/form-data', ADescription);
+end;
+
+function THTTPDocRoute.ProducesProblem(ACode: Integer): THTTPDocRoute;
+var
+  I: Integer;
+  CodeStr: string;
+begin
+  CodeStr := ACode.ToString;
+  for I := 0 to Responses.Count - 1 do
+    if SameText(Responses[I].Code, CodeStr) then
+      Exit(Self);
+
+  Result := AddResponseRef(ACode, 'ProblemDetails', GetDefaultProblemDescription(ACode), 'application/problem+json');
+end;
+
+function THTTPDocRoute.ProducesProblem(const ACodes: array of Integer): THTTPDocRoute;
+var
+  C: Integer;
+begin
+  for C in ACodes do
+    ProducesProblem(C);
+  Result := Self;
+end;
+
+function THTTPDocRoute.ProducesStandardProblems: THTTPDocRoute;
+begin
+  Result := ProducesProblem([400, 401, 403, 404, 422, 500]);
+end;
+
+function THTTPDocRoute.QueryParam(const AName: string; const AType: string; const ADefault: string; const ADescription: string): THTTPDocRoute;
+begin
+  Result := AddQueryParam(AName, False, AType, ADefault, ADescription);
+end;
+
+function THTTPDocRoute.PathParam(const AName: string; const AType: string; const ADescription: string): THTTPDocRoute;
+begin
+  Result := AddPathParam(AName, True, AType, '', ADescription);
+end;
+
+function THTTPDocRoute.HeaderParam(const AName: string; const AType: string; Required: Boolean; const ADescription: string): THTTPDocRoute;
+begin
+  Result := AddHeaderParam(AName, Required, AType, '', ADescription);
+end;
+
+function THTTPDocRoute.EnumParam(const AName: string; const AValues: array of string; const ADescription: string): THTTPDocRoute;
+begin
+  Result := AddEnumParam(AName, AValues, False, piQuery, '', ADescription);
+end;
+
+function THTTPDocRoute.SecurityBearer: THTTPDocRoute;
+begin
+  Result := SetSecurityBearer;
+end;
+
+function THTTPDocRoute.SecurityBasic: THTTPDocRoute;
+begin
+  Result := SetSecurityBasic;
+end;
+
+function THTTPDocRoute.SecurityApiKey(const AHeader: string): THTTPDocRoute;
+begin
+  Result := SetSecurityApiKey(AHeader);
+end;
+
+function THTTPDocRoute.SecurityNone: THTTPDocRoute;
+begin
+  Result := SetSecurityNone;
+end;
+
 function THTTPDocRoute.AddTags(ADescription: string): THTTPDocRoute;
 begin
   FTags.Add(ADescription);
@@ -1627,10 +1886,25 @@ end;
 
 { TSwaggerRouter }
 
+const
+  SCHEMA_PROBLEM_DETAILS =
+    '{' +
+    '  "type": "object",' +
+    '  "properties": {' +
+    '    "type": {"type": "string", "example": "about:blank"},' +
+    '    "title": {"type": "string", "example": "Bad Request"},' +
+    '    "status": {"type": "integer", "example": 400},' +
+    '    "detail": {"type": "string", "example": "One or more validation errors occurred."},' +
+    '    "instance": {"type": "string", "example": "/api/v1/resource/123"}' +
+    '  },' +
+    '  "required": ["type", "title", "status"]' +
+    '}';
+
 constructor TSwaggerRouter.Create;
 begin
   inherited Create;
   FCacheLock := TCriticalSection.Create; // Inicializa o Lock
+  FGroups := TFPObjectList.Create(True);
   FDefaultCustomHeaders := TStringList.Create;
   FComponents := TSwaggerComponents.Create;
   FServers := TJSONArray.Create;
@@ -1640,10 +1914,12 @@ begin
   FDocRoute := '';
   FDocCache := '';
   FDocCacheBasePath := '';
+  EnsureModel('ProblemDetails', SCHEMA_PROBLEM_DETAILS);
 end;
 
 destructor TSwaggerRouter.Destroy;
 begin
+  FGroups.Free;
   FComponents.Free;
   FDefaultCustomHeaders.Free;
   FServers.Free;
@@ -1737,6 +2013,177 @@ function TSwaggerRouter.Patch(const APattern: string; ACallBack: TRouteCallBack
   ): THTTPDocRoute;
 begin
   Result := RegisterRoute(APattern, rmPatch, ACallBack);
+end;
+
+function TSwaggerRouter.Options(const APattern: string; ACallBack: TRouteCallBack
+  ): THTTPDocRoute;
+begin
+  Result := RegisterRoute(APattern, rmOptions, ACallBack);
+end;
+
+function TSwaggerRouter.Head(const APattern: string; ACallBack: TRouteCallBack
+  ): THTTPDocRoute;
+begin
+  Result := RegisterRoute(APattern, rmHead, ACallBack);
+end;
+
+function TSwaggerRouter.Group(const APrefix: string): TSwaggerRouteGroup;
+begin
+  Result := TSwaggerRouteGroup.Create(Self, APrefix);
+  FGroups.Add(Result);
+end;
+
+{ TSwaggerRouteGroup }
+
+constructor TSwaggerRouteGroup.Create(ARouter: TSwaggerRouter; const APrefix: string);
+var
+  Clean: string;
+begin
+  inherited Create;
+  FRouter := ARouter;
+  Clean := Trim(APrefix);
+  if not Clean.StartsWith('/') then
+    Clean := '/' + Clean;
+  if (Length(Clean) > 1) and Clean.EndsWith('/') then
+    Clean := Copy(Clean, 1, Length(Clean) - 1);
+  FPrefix := Clean;
+  FTag := '';
+  FSecurity := ssNone;
+  FApiKeyHeader := 'X-API-Key';
+  FHasSecurity := False;
+  SetLength(FProblemCodes, 0);
+end;
+
+function TSwaggerRouteGroup.CombinePath(const ASubPattern: string): string;
+var
+  CleanSub: string;
+begin
+  CleanSub := Trim(ASubPattern);
+  if CleanSub = '/' then
+    CleanSub := '';
+
+  if CleanSub.IsEmpty then
+    Result := FPrefix
+  else if CleanSub.StartsWith('/') then
+    Result := FPrefix + CleanSub
+  else
+    Result := FPrefix + '/' + CleanSub;
+end;
+
+function TSwaggerRouteGroup.ApplyGroupSettings(ARoute: THTTPDocRoute): THTTPDocRoute;
+var
+  I: Integer;
+begin
+  if not FTag.IsEmpty then
+    ARoute.AddTag(FTag);
+
+  if FHasSecurity then
+  begin
+    case FSecurity of
+      ssBearer: ARoute.SetSecurityBearer;
+      ssBasic:  ARoute.SetSecurityBasic;
+      ssApiKey: ARoute.SetSecurityApiKey(FApiKeyHeader);
+      ssNone:   ARoute.SetSecurityNone;
+    end;
+  end;
+
+  for I := 0 to High(FProblemCodes) do
+    ARoute.ProducesProblem(FProblemCodes[I]);
+
+  Result := ARoute;
+end;
+
+function TSwaggerRouteGroup.Tag(const ATag: string): TSwaggerRouteGroup;
+begin
+  FTag := ATag;
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.Security(AScheme: TSecurityScheme): TSwaggerRouteGroup;
+begin
+  FSecurity := AScheme;
+  FHasSecurity := True;
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.SecurityBearer: TSwaggerRouteGroup;
+begin
+  Result := Security(ssBearer);
+end;
+
+function TSwaggerRouteGroup.SecurityBasic: TSwaggerRouteGroup;
+begin
+  Result := Security(ssBasic);
+end;
+
+function TSwaggerRouteGroup.SecurityApiKey(const AHeader: string): TSwaggerRouteGroup;
+begin
+  FApiKeyHeader := AHeader;
+  Result := Security(ssApiKey);
+end;
+
+function TSwaggerRouteGroup.SecurityNone: TSwaggerRouteGroup;
+begin
+  Result := Security(ssNone);
+end;
+
+function TSwaggerRouteGroup.Problem(ACode: Integer): TSwaggerRouteGroup;
+var
+  Len, I: Integer;
+begin
+  for I := 0 to High(FProblemCodes) do
+    if FProblemCodes[I] = ACode then
+      Exit(Self);
+  Len := Length(FProblemCodes);
+  SetLength(FProblemCodes, Len + 1);
+  FProblemCodes[Len] := ACode;
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.StandardProblems: TSwaggerRouteGroup;
+begin
+  Problem(400);
+  Problem(401);
+  Problem(403);
+  Problem(404);
+  Problem(422);
+  Problem(500);
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.Get(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := ApplyGroupSettings(FRouter.Get(CombinePath(ASubPattern), ACallBack));
+end;
+
+function TSwaggerRouteGroup.Post(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := ApplyGroupSettings(FRouter.Post(CombinePath(ASubPattern), ACallBack));
+end;
+
+function TSwaggerRouteGroup.Put(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := ApplyGroupSettings(FRouter.Put(CombinePath(ASubPattern), ACallBack));
+end;
+
+function TSwaggerRouteGroup.Delete(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := ApplyGroupSettings(FRouter.Delete(CombinePath(ASubPattern), ACallBack));
+end;
+
+function TSwaggerRouteGroup.Patch(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := ApplyGroupSettings(FRouter.Patch(CombinePath(ASubPattern), ACallBack));
+end;
+
+function TSwaggerRouteGroup.Options(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := ApplyGroupSettings(FRouter.Options(CombinePath(ASubPattern), ACallBack));
+end;
+
+function TSwaggerRouteGroup.Head(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
+begin
+  Result := ApplyGroupSettings(FRouter.Head(CombinePath(ASubPattern), ACallBack));
 end;
 
 function TSwaggerRouter.HasModel(const AName: string): Boolean;
