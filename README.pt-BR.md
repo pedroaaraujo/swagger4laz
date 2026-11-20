@@ -170,17 +170,20 @@ SwaggerRouter.Get('/api/v1/busca/:categoria', @HandleBusca)
 Declare formatos de entrada esperados para JSON, formatos binários (CBOR, BSON), XML e formulários:
 
 ```pascal
+// Declaração fluente de payload de entrada em múltiplos formatos
+Route.Consumes('ProdutoInput', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON], True, 'Dados do produto');
+
 // Payload JSON padrão referenciando components.schemas/ProdutoInput
 Route.ConsumesJson('ProdutoInput', True, 'Dados do produto em JSON');
 
 // Payload binário CBOR (RFC 8949)
-Route.SetBodyContentRef('ProdutoInput', True, 'application/cbor', 'Payload binário CBOR');
+Route.SetBodyContentRef('ProdutoInput', True, MEDIA_TYPE_CBOR, 'Payload binário CBOR');
 
 // Payload binário BSON (v1.1)
-Route.SetBodyContentRef('ProdutoInput', True, 'application/bson', 'Documento binário BSON');
+Route.SetBodyContentRef('ProdutoInput', True, MEDIA_TYPE_BSON, 'Documento binário BSON');
 
 // Payload XML corporativo
-Route.SetBodyContentRef('ProdutoInput', True, 'application/xml', 'Documento XML');
+Route.SetBodyContentRef('ProdutoInput', True, MEDIA_TYPE_XML, 'Documento XML');
 
 // Dados codificados em formulário padrão (application/x-www-form-urlencoded)
 Route.ConsumesFormData('Formulário de login');
@@ -196,25 +199,42 @@ Route.ConsumesMultipart('Upload de arquivos e anexos');
 O Swagger4Laz permite mapear múltiplas representações sob o mesmo código de status HTTP, viabilizando documentação OpenAPI 3.1 precisa para endpoints com negociação de conteúdo via cabeçalho `Accept`:
 
 ```pascal
-// Referência a objeto único em JSON (padrão)
-Route.Produces(200, 'Produto', 'Operação realizada com sucesso');
+// Definição fluente de resposta multi-formato em chamada única:
+Route.Produces(200, 'Produto', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON, MEDIA_TYPE_XML, MEDIA_TYPE_CSV], 'Produto em múltiplos formatos');
 
-// Definições de respostas multi-formato:
+// Encadeamento fluente entre media types:
 Route
-  .AddResponseRef(200, 'Produto', 'Resposta padrão em JSON', 'application/json')
-  .AddResponseRef(200, 'Produto', 'Payload binário CBOR de alta taxa', 'application/cbor')
-  .AddResponseRef(200, 'Produto', 'Documento binário BSON', 'application/bson')
-  .AddResponseRef(200, 'Produto', 'Documento XML enterprise', 'application/xml')
-  .AddResponseRefArray(200, 'Produto', 'Exportação tabular em CSV', 'text/csv');
+  .Produces(200, 'Produto', 'Resposta padrão em JSON')
+  .Produces([MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON]);
 
-// Lista simples: { type: "array", items: { $ref: #/components/schemas/Produto } }
-Route.ProducesArray(200, 'Produto', 'Lista de produtos');
+// Listas e envelopes paginados em múltiplos formatos:
+Route.ProducesArray(200, 'Produto', [MEDIA_TYPE_JSON, MEDIA_TYPE_CSV], 'Lista de produtos e exportação CSV');
+Route.ProducesPaginated(200, 'Produto', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Produtos paginados');
 
-// Envelope paginado: { type: "object", properties: { items: [...], total_records: ... } }
-Route.ProducesPaginated(200, 'Produto', 'Resposta paginada');
+// Cabeçalhos de compressão e codificação de conteúdo:
+Route
+  .AcceptsGzip     // Documenta parâmetro de cabeçalho 'Accept-Encoding: gzip'
+  .ProducesGzip;   // Documenta cabeçalho de resposta 'Content-Encoding: gzip' no 200
 
 // Resposta sem conteúdo (HTTP 204)
 Route.ProducesEmpty(204, 'Registro excluído');
+```
+
+### Defaults Fluentes em Route Groups e Router
+
+Elimine repetição de código declarando media types e parâmetros de compressão diretamente no router ou nos grupos de rota:
+
+```pascal
+// Defaults no nível de grupo herdados automaticamente por todas as rotas filhas:
+Api := SwaggerRouter.Group('/api/v1/catalogo')
+  .Tag('Catalogo')
+  .ProducesMediaTypes([MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON])
+  .ConsumesMediaTypes([MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR])
+  .EnableGzip;
+
+// Documenta automaticamente saídas JSON, CBOR, BSON e compressão GZIP:
+Api.Get('/produtos', @HandleListProdutos)
+   .Produces(200, 'Produto', 'Itens do catálogo');
 ```
 
 ### Panorama de Tradeoffs dos Media Types

@@ -5,7 +5,34 @@ unit swagger4laz;
 interface
 
 uses
-  Classes, SysUtils, StrUtils, syncobjs, contnrs, httproute, HTTPDefs, RegExpr, fpjson, jsonparser, fgl, Variants, TypInfo;
+  Classes, SysUtils, StrUtils, Types, syncobjs, contnrs, httproute, HTTPDefs, RegExpr, fpjson, jsonparser, fgl, Variants, TypInfo;
+
+const
+  // Canonical Media Types (RFC 6838, RFC 8949, BSON, XML, CSV)
+  MEDIA_TYPE_JSON         = 'application/json';
+  MEDIA_TYPE_CBOR         = 'application/cbor';
+  MEDIA_TYPE_BSON         = 'application/bson';
+  MEDIA_TYPE_XML          = 'application/xml';
+  MEDIA_TYPE_TEXT_XML     = 'text/xml';
+  MEDIA_TYPE_CSV          = 'text/csv';
+  MEDIA_TYPE_OCTET_STREAM = 'application/octet-stream';
+  MEDIA_TYPE_FORM         = 'application/x-www-form-urlencoded';
+  MEDIA_TYPE_MULTIPART    = 'multipart/form-data';
+  MEDIA_TYPE_PROBLEM_JSON = 'application/problem+json';
+
+  // Compression Encodings
+  ENCODING_GZIP           = 'gzip';
+  ENCODING_DEFLATE        = 'deflate';
+  ENCODING_BR             = 'br';
+  ENCODING_IDENTITY       = 'identity';
+
+  // Backward-compatible MIME aliases
+  MIME_APPLICATION_JSON   = MEDIA_TYPE_JSON;
+  MIME_APPLICATION_CBOR   = MEDIA_TYPE_CBOR;
+  MIME_APPLICATION_BSON   = MEDIA_TYPE_BSON;
+  MIME_APPLICATION_XML    = MEDIA_TYPE_XML;
+  MIME_TEXT_XML           = MEDIA_TYPE_TEXT_XML;
+  MIME_TEXT_CSV           = MEDIA_TYPE_CSV;
 
 type
   TSwaggerRouter = class;
@@ -65,11 +92,45 @@ type
     Description: string;
   end;
 
+  { TDocContentItem }
+  TDocContentItem = class
+  public
+    ContentType: string;
+    Content: string;
+    Description: string;
+  end;
+
+  TDocContentItemList = specialize TFPGObjectList<TDocContentItem>;
+
+  { TDocResponseHeader }
+  TDocResponseHeader = class
+  public
+    Name: string;
+    HeaderType: string;
+    Description: string;
+    DefaultValue: string;
+  end;
+
+  TDocResponseHeaderList = specialize TFPGObjectList<TDocResponseHeader>;
+
   TDocResponse = class
+  private
+    FContents: TDocContentItemList;
+    FHeaders: TDocResponseHeaderList;
   public
     Code: string;
     Description: string;
     DocContent: TDocContent;
+    property Contents: TDocContentItemList read FContents;
+    property Headers: TDocResponseHeaderList read FHeaders;
+
+    constructor Create;
+    destructor Destroy; override;
+
+    function HasContentType(const AContentType: string): Boolean;
+    procedure AddOrUpdateContent(const AContentType, AContent: string; const ADescription: string = '');
+    function FindHeader(const AName: string): TDocResponseHeader;
+    procedure AddOrUpdateHeader(const AName, AType: string; const ADescription: string = ''; const ADefault: string = '');
   end;
 
   TDocReqParam = class
@@ -93,6 +154,9 @@ type
   private
     FDocMethod: TRouteMethod;
     FBodyContent: TDocContent;
+    FBodyContents: TDocContentItemList;
+    FDefaultMediaTypes: array of string;
+    FDefaultConsumesMediaTypes: array of string;
     FParams: TDocReqParamList;
     FResponses: TResponseList;
     FSecurity: TSecurityScheme;
@@ -155,14 +219,32 @@ type
     function SetSecurityNone: THTTPDocRoute;
 
     { Fluent Semantic Chaining }
-    function Produces(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute;
-    function ProducesArray(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute;
-    function ProducesPaginated(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute;
+    function Produces(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute; overload;
+    function Produces(const AMediaTypes: array of string): THTTPDocRoute; overload;
+    function Produces(Code: Integer; const AModelName: string; const AMediaTypes: array of string; const ADescription: string = ''): THTTPDocRoute; overload;
+    function ProducesArray(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute; overload;
+    function ProducesArray(Code: Integer; const AModelName: string; const AMediaTypes: array of string; const ADescription: string = ''): THTTPDocRoute; overload;
+    function ProducesPaginated(Code: Integer; const AModelName: string; const ADescription: string = ''): THTTPDocRoute; overload;
+    function ProducesPaginated(Code: Integer; const AModelName: string; const AMediaTypes: array of string; const ADescription: string = ''): THTTPDocRoute; overload;
     function ProducesEmpty(Code: Integer = 204; const ADescription: string = ''): THTTPDocRoute;
-    function Consumes(const AModelName: string; Required: Boolean = True; const ADescription: string = 'Payload'): THTTPDocRoute;
+    function Consumes(const AModelName: string; Required: Boolean = True; const ADescription: string = 'Payload'): THTTPDocRoute; overload;
+    function Consumes(const AModelName: string; const AMediaTypes: array of string; Required: Boolean = True; const ADescription: string = 'Payload'): THTTPDocRoute; overload;
+    function Consumes(const AMediaTypes: array of string): THTTPDocRoute; overload;
     function ConsumesJson(const AModelName: string; Required: Boolean = True; const ADescription: string = 'JSON Payload'): THTTPDocRoute;
     function ConsumesFormData(const ADescription: string = 'Form Data Payload'): THTTPDocRoute;
     function ConsumesMultipart(const ADescription: string = 'Multipart Form Payload'): THTTPDocRoute;
+
+    { Content Encoding & Compression Helpers }
+    function AcceptsGzip(Required: Boolean = False): THTTPDocRoute;
+    function AcceptsEncoding(const AEncoding: string = 'gzip'; Required: Boolean = False): THTTPDocRoute;
+    function ProducesEncoding(const AEncoding: string = 'gzip'; Code: Integer = 200): THTTPDocRoute;
+    function ProducesGzip(Code: Integer = 200): THTTPDocRoute;
+    function AddResponseHeader(Code: Integer; const AName, AType: string; const ADescription: string = ''; const ADefault: string = ''): THTTPDocRoute; overload;
+    function AddResponseHeader(const ACode: string; const AName, AType: string; const ADescription: string = ''; const ADefault: string = ''): THTTPDocRoute; overload;
+
+    { Defaults Setters }
+    procedure SetDefaultMediaTypes(const AMediaTypes: array of string);
+    procedure SetDefaultConsumesMediaTypes(const AMediaTypes: array of string);
 
     { RFC 7807 Problem Details }
     function ProducesProblem(ACode: Integer): THTTPDocRoute; overload;
@@ -204,6 +286,10 @@ type
     FApiKeyHeader: string;
     FHasSecurity: Boolean;
     FProblemCodes: array of Integer;
+    FDefaultMediaTypes: array of string;
+    FDefaultConsumesMediaTypes: array of string;
+    FDefaultEncodings: array of string;
+    FEnableGzip: Boolean;
     function CombinePath(const ASubPattern: string): string;
     function ApplyGroupSettings(ARoute: THTTPDocRoute): THTTPDocRoute;
   public
@@ -221,6 +307,13 @@ type
 
     function Problem(ACode: Integer): TSwaggerRouteGroup;
     function StandardProblems: TSwaggerRouteGroup;
+
+    function ProducesMediaTypes(const AMediaTypes: array of string): TSwaggerRouteGroup;
+    function ConsumesMediaTypes(const AMediaTypes: array of string): TSwaggerRouteGroup;
+    function AcceptsGzip(Required: Boolean = False): TSwaggerRouteGroup;
+    function AcceptsEncoding(const AEncoding: string = 'gzip'; Required: Boolean = False): TSwaggerRouteGroup;
+    function ProducesEncoding(const AEncoding: string = 'gzip'): TSwaggerRouteGroup;
+    function EnableGzip(AEnabled: Boolean = True): TSwaggerRouteGroup;
 
     function Get(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Post(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
@@ -255,6 +348,10 @@ type
     FDescription: string;
     FDefaultContentType: string;
     FDefaultCustomHeaders: TStringList;
+    FDefaultMediaTypes: array of string;
+    FDefaultConsumesMediaTypes: array of string;
+    FDefaultEncodings: array of string;
+    FEnableGzip: Boolean;
     FServers: TJSONArray;
     FContactObj: TJSONObject;
     FLicenseObj: TJSONObject;
@@ -286,6 +383,16 @@ type
     function Options(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Head(const APattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
     function Group(const APrefix: string): TSwaggerRouteGroup;
+
+    { Defaults & Encodings }
+    function SetDefaultMediaTypes(const AMediaTypes: array of string): TSwaggerRouter;
+    function SetDefaultConsumesMediaTypes(const AMediaTypes: array of string): TSwaggerRouter;
+    function SetDefaultEncodings(const AEncodings: array of string): TSwaggerRouter;
+    function EnableGzip(AEnabled: Boolean = True): TSwaggerRouter;
+    function IsGzipEnabled: Boolean;
+    function GetDefaultMediaTypes: TStringDynArray;
+    function GetDefaultConsumesMediaTypes: TStringDynArray;
+    function GetDefaultEncodings: TStringDynArray;
 
     { Model & Enum Registration }
     function HasModel(const AName: string): Boolean;
@@ -1040,7 +1147,7 @@ begin
             JsonMethod.Add('parameters', JsonParams);
             JsonMethod.Add('responses', JsonResponse);
 
-            if not BodyContent.Content.IsEmpty then
+            if (not BodyContent.Content.IsEmpty) or (Route.FBodyContents.Count > 0) then
               JsonMethod.Add('requestBody', JsonBody);
 
             case Route.Security of
@@ -1280,6 +1387,102 @@ begin
     Result.Add('schemas', FModels.Clone as TJSONObject);
 end;
 
+{ TDocResponse }
+
+constructor TDocResponse.Create;
+begin
+  inherited Create;
+  FContents := TDocContentItemList.Create(True);
+  FHeaders := TDocResponseHeaderList.Create(True);
+  Code := '';
+  Description := '';
+  DocContent.ContentType := '';
+  DocContent.Content := '';
+  DocContent.Required := False;
+  DocContent.Description := '';
+end;
+
+destructor TDocResponse.Destroy;
+begin
+  FHeaders.Free;
+  FContents.Free;
+  inherited Destroy;
+end;
+
+function TDocResponse.HasContentType(const AContentType: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to FContents.Count - 1 do
+    if SameText(FContents[I].ContentType, AContentType) then
+      Exit(True);
+  if SameText(DocContent.ContentType, AContentType) and not DocContent.Content.IsEmpty then
+    Exit(True);
+end;
+
+procedure TDocResponse.AddOrUpdateContent(const AContentType, AContent: string; const ADescription: string);
+var
+  I: Integer;
+  Item: TDocContentItem;
+begin
+  for I := 0 to FContents.Count - 1 do
+  begin
+    if SameText(FContents[I].ContentType, AContentType) then
+    begin
+      FContents[I].Content := AContent;
+      if not ADescription.IsEmpty then
+        FContents[I].Description := ADescription;
+      DocContent.ContentType := AContentType;
+      DocContent.Content := AContent;
+      Exit;
+    end;
+  end;
+
+  Item := TDocContentItem.Create;
+  Item.ContentType := AContentType;
+  Item.Content := AContent;
+  Item.Description := ADescription;
+  FContents.Add(Item);
+
+  if DocContent.ContentType.IsEmpty or (FContents.Count = 1) then
+  begin
+    DocContent.ContentType := AContentType;
+    DocContent.Content := AContent;
+  end;
+end;
+
+function TDocResponse.FindHeader(const AName: string): TDocResponseHeader;
+var
+  I: Integer;
+begin
+  Result := nil;
+  for I := 0 to FHeaders.Count - 1 do
+    if SameText(FHeaders[I].Name, AName) then
+      Exit(FHeaders[I]);
+end;
+
+procedure TDocResponse.AddOrUpdateHeader(const AName, AType: string; const ADescription: string; const ADefault: string);
+var
+  H: TDocResponseHeader;
+begin
+  H := FindHeader(AName);
+  if H = nil then
+  begin
+    H := TDocResponseHeader.Create;
+    H.Name := AName;
+    FHeaders.Add(H);
+  end;
+  if not AType.IsEmpty then
+    H.HeaderType := AType
+  else if H.HeaderType.IsEmpty then
+    H.HeaderType := 'string';
+  if not ADescription.IsEmpty then
+    H.Description := ADescription;
+  if not ADefault.IsEmpty then
+    H.DefaultValue := ADefault;
+end;
+
 { THTTPDocRoute }
 
 function THTTPDocRoute.GetPath: string;
@@ -1296,6 +1499,9 @@ begin
   FDocMethod := rmUnknown;
   FResponses := TResponseList.Create(True);
   FParams := TDocReqParamList.Create(True);
+  FBodyContents := TDocContentItemList.Create(True);
+  SetLength(FDefaultMediaTypes, 0);
+  SetLength(FDefaultConsumesMediaTypes, 0);
   FTags := TStringList.Create;
   FSecurity := ssNone;
   FDeprecated := False;
@@ -1315,6 +1521,7 @@ end;
 
 destructor THTTPDocRoute.Destroy;
 begin
+  FBodyContents.Free;
   FResponses.Free;
   FTags.Free;
   FParams.Free;
@@ -1385,7 +1592,6 @@ function THTTPDocRoute.AddResponse(Code: string; ADescription: string;
   Content: string; ContentType: string): THTTPDocRoute;
 var
   Response: TDocResponse;
-  I: Integer;
 begin
   if SameText(Code, 'default') then
     Code := 'default'
@@ -1394,15 +1600,22 @@ begin
     raise Exception.Create(MsgInvalidResponseCode(Code));
   if ContentType.Trim.IsEmpty then
     raise Exception.Create(MsgResponseContentTypeEmpty);
-  for I := 0 to Responses.Count - 1 do
-    if SameText(Responses[I].Code, Code) then
-      raise Exception.Create(MsgDuplicateResponse(Code));
-  Response := TDocResponse.Create;
-  Response.Code := Code;
-  Response.Description := ADescription;
-  Response.DocContent.Content := Content;
-  Response.DocContent.ContentType := ContentType;
-  FResponses.Add(Response);
+
+  Response := FindResponse(Code);
+  if Response <> nil then
+  begin
+    if not ADescription.IsEmpty and Response.Description.IsEmpty then
+      Response.Description := ADescription;
+    Response.AddOrUpdateContent(ContentType, Content, ADescription);
+  end
+  else
+  begin
+    Response := TDocResponse.Create;
+    Response.Code := Code;
+    Response.Description := ADescription;
+    Response.AddOrUpdateContent(ContentType, Content, ADescription);
+    FResponses.Add(Response);
+  end;
   InvalidateCache;
   Result := Self;
 end;
@@ -1461,8 +1674,12 @@ end;
 function THTTPDocRoute.JsonResponse: TJSONObject;
 var
   R: TDocResponse;
-  Item, JsonCont, JsonSchema: TJSONObject;
+  Item, JsonCont, JsonHeaders, JsonSchema, HObj, HSchema: TJSONObject;
   ContentStr: string;
+  I: Integer;
+  CItem: TDocContentItem;
+  H: TDocResponseHeader;
+  HasAnyContent: Boolean;
 begin
   Result := TJSONObject.Create;
   try
@@ -1472,14 +1689,70 @@ begin
       try
         Item.Add('description', R.Description);
 
-        ContentStr := Trim(R.DocContent.Content);
-        if not ContentStr.IsEmpty then
+        // Response Headers (RFC 7230, OpenAPI 3.1)
+        if R.Headers.Count > 0 then
         begin
-          JsonCont := TJSONObject.Create;
-          Item.Add('content', JsonCont);
-          JsonSchema := TJSONObject.Create;
-          JsonCont.Add(R.DocContent.ContentType, JsonSchema);
-          JsonSchema.Add('schema', JsonSchemaFromContent(ContentStr));
+          JsonHeaders := TJSONObject.Create;
+          Item.Add('headers', JsonHeaders);
+          for I := 0 to R.Headers.Count - 1 do
+          begin
+            H := R.Headers[I];
+            HObj := TJSONObject.Create;
+            JsonHeaders.Add(H.Name, HObj);
+            if not H.Description.IsEmpty then
+              HObj.Add('description', H.Description);
+            HSchema := TJSONObject.Create;
+            HObj.Add('schema', HSchema);
+            if not H.HeaderType.IsEmpty then
+              HSchema.Add('type', H.HeaderType)
+            else
+              HSchema.Add('type', 'string');
+            if not H.DefaultValue.IsEmpty then
+              HSchema.Add('default', H.DefaultValue);
+          end;
+        end;
+
+        // Content Media Types
+        if R.Contents.Count > 0 then
+        begin
+          HasAnyContent := False;
+          for I := 0 to R.Contents.Count - 1 do
+          begin
+            if not Trim(R.Contents[I].Content).IsEmpty then
+            begin
+              HasAnyContent := True;
+              Break;
+            end;
+          end;
+
+          if HasAnyContent then
+          begin
+            JsonCont := TJSONObject.Create;
+            Item.Add('content', JsonCont);
+            for I := 0 to R.Contents.Count - 1 do
+            begin
+              CItem := R.Contents[I];
+              ContentStr := Trim(CItem.Content);
+              if not ContentStr.IsEmpty then
+              begin
+                JsonSchema := TJSONObject.Create;
+                JsonCont.Add(CItem.ContentType, JsonSchema);
+                JsonSchema.Add('schema', JsonSchemaFromContent(ContentStr));
+              end;
+            end;
+          end;
+        end
+        else
+        begin
+          ContentStr := Trim(R.DocContent.Content);
+          if not ContentStr.IsEmpty then
+          begin
+            JsonCont := TJSONObject.Create;
+            Item.Add('content', JsonCont);
+            JsonSchema := TJSONObject.Create;
+            JsonCont.Add(R.DocContent.ContentType, JsonSchema);
+            JsonSchema.Add('schema', JsonSchemaFromContent(ContentStr));
+          end;
         end;
 
         Result.Add(R.Code, Item);
@@ -1650,11 +1923,37 @@ end;
 
 function THTTPDocRoute.SetBodyContent(Content: string; Required: Boolean;
   ContentType: string; ADescription: string): THTTPDocRoute;
+var
+  I: Integer;
+  Found: Boolean;
+  Item: TDocContentItem;
 begin
   FBodyContent.Content := Content;
   FBodyContent.ContentType := ContentType;
   FBodyContent.Required := Required;
   FBodyContent.Description := ADescription;
+
+  Found := False;
+  for I := 0 to FBodyContents.Count - 1 do
+  begin
+    if SameText(FBodyContents[I].ContentType, ContentType) then
+    begin
+      FBodyContents[I].Content := Content;
+      FBodyContents[I].Description := ADescription;
+      Found := True;
+      Break;
+    end;
+  end;
+
+  if not Found then
+  begin
+    Item := TDocContentItem.Create;
+    Item.ContentType := ContentType;
+    Item.Content := Content;
+    Item.Description := ADescription;
+    FBodyContents.Add(Item);
+  end;
+
   InvalidateCache;
   Result := Self;
 end;
@@ -1669,20 +1968,38 @@ function THTTPDocRoute.JsonBody: TJSONObject;
 var
   JBody, JSchema: TJSONObject;
   ContentStr: string;
+  I: Integer;
+  CItem: TDocContentItem;
 begin
   Result := TJSONObject.Create;
   try
     JBody := TJSONObject.Create;
     Result.Add('content', JBody);
-    JSchema := TJSONObject.Create;
-    JBody.Add(FBodyContent.ContentType, JSchema);
 
     if not FBodyContent.Description.IsEmpty then
       Result.Add('description', FBodyContent.Description);
     Result.Add('required', FBodyContent.Required);
 
-    ContentStr := Trim(FBodyContent.Content);
-    JSchema.Add('schema', JsonSchemaFromContent(ContentStr));
+    if FBodyContents.Count > 0 then
+    begin
+      for I := 0 to FBodyContents.Count - 1 do
+      begin
+        CItem := FBodyContents[I];
+        JSchema := TJSONObject.Create;
+        JBody.Add(CItem.ContentType, JSchema);
+        ContentStr := Trim(CItem.Content);
+        if not ContentStr.IsEmpty then
+          JSchema.Add('schema', JsonSchemaFromContent(ContentStr));
+      end;
+    end
+    else
+    begin
+      JSchema := TJSONObject.Create;
+      JBody.Add(FBodyContent.ContentType, JSchema);
+      ContentStr := Trim(FBodyContent.Content);
+      if not ContentStr.IsEmpty then
+        JSchema.Add('schema', JsonSchemaFromContent(ContentStr));
+    end;
   except
     Result.Free;
     raise;
@@ -1745,18 +2062,107 @@ begin
 end;
 
 function THTTPDocRoute.Produces(Code: Integer; const AModelName: string; const ADescription: string): THTTPDocRoute;
+var
+  M: Integer;
 begin
-  Result := AddResponseRef(Code, AModelName, ADescription);
+  if Length(FDefaultMediaTypes) > 0 then
+  begin
+    for M := Low(FDefaultMediaTypes) to High(FDefaultMediaTypes) do
+      AddResponseRef(Code, AModelName, ADescription, FDefaultMediaTypes[M]);
+    Result := Self;
+  end
+  else
+    Result := AddResponseRef(Code, AModelName, ADescription, MEDIA_TYPE_JSON);
+end;
+
+function THTTPDocRoute.Produces(const AMediaTypes: array of string): THTTPDocRoute;
+var
+  M: Integer;
+  LastResp: TDocResponse;
+  ContentToClone: string;
+begin
+  if FResponses.Count > 0 then
+  begin
+    LastResp := FResponses[FResponses.Count - 1];
+    ContentToClone := LastResp.DocContent.Content;
+    for M := Low(AMediaTypes) to High(AMediaTypes) do
+    begin
+      if not LastResp.HasContentType(AMediaTypes[M]) then
+        LastResp.AddOrUpdateContent(AMediaTypes[M], ContentToClone, LastResp.Description);
+    end;
+  end;
+  InvalidateCache;
+  Result := Self;
+end;
+
+function THTTPDocRoute.Produces(Code: Integer; const AModelName: string; const AMediaTypes: array of string; const ADescription: string): THTTPDocRoute;
+var
+  M: Integer;
+begin
+  if Length(AMediaTypes) = 0 then
+    Result := Produces(Code, AModelName, ADescription)
+  else
+  begin
+    for M := Low(AMediaTypes) to High(AMediaTypes) do
+      AddResponseRef(Code, AModelName, ADescription, AMediaTypes[M]);
+    Result := Self;
+  end;
 end;
 
 function THTTPDocRoute.ProducesArray(Code: Integer; const AModelName: string; const ADescription: string): THTTPDocRoute;
+var
+  M: Integer;
 begin
-  Result := AddResponseRefArray(Code, AModelName, ADescription);
+  if Length(FDefaultMediaTypes) > 0 then
+  begin
+    for M := Low(FDefaultMediaTypes) to High(FDefaultMediaTypes) do
+      AddResponseRefArray(Code, AModelName, ADescription, FDefaultMediaTypes[M]);
+    Result := Self;
+  end
+  else
+    Result := AddResponseRefArray(Code, AModelName, ADescription, MEDIA_TYPE_JSON);
+end;
+
+function THTTPDocRoute.ProducesArray(Code: Integer; const AModelName: string; const AMediaTypes: array of string; const ADescription: string): THTTPDocRoute;
+var
+  M: Integer;
+begin
+  if Length(AMediaTypes) = 0 then
+    Result := ProducesArray(Code, AModelName, ADescription)
+  else
+  begin
+    for M := Low(AMediaTypes) to High(AMediaTypes) do
+      AddResponseRefArray(Code, AModelName, ADescription, AMediaTypes[M]);
+    Result := Self;
+  end;
 end;
 
 function THTTPDocRoute.ProducesPaginated(Code: Integer; const AModelName: string; const ADescription: string): THTTPDocRoute;
+var
+  M: Integer;
 begin
-  Result := AddResponseRefPaginated(Code, AModelName, ADescription);
+  if Length(FDefaultMediaTypes) > 0 then
+  begin
+    for M := Low(FDefaultMediaTypes) to High(FDefaultMediaTypes) do
+      AddResponseRefPaginated(Code, AModelName, ADescription, FDefaultMediaTypes[M]);
+    Result := Self;
+  end
+  else
+    Result := AddResponseRefPaginated(Code, AModelName, ADescription, MEDIA_TYPE_JSON);
+end;
+
+function THTTPDocRoute.ProducesPaginated(Code: Integer; const AModelName: string; const AMediaTypes: array of string; const ADescription: string): THTTPDocRoute;
+var
+  M: Integer;
+begin
+  if Length(AMediaTypes) = 0 then
+    Result := ProducesPaginated(Code, AModelName, ADescription)
+  else
+  begin
+    for M := Low(AMediaTypes) to High(AMediaTypes) do
+      AddResponseRefPaginated(Code, AModelName, ADescription, AMediaTypes[M]);
+    Result := Self;
+  end;
 end;
 
 function THTTPDocRoute.ProducesEmpty(Code: Integer; const ADescription: string): THTTPDocRoute;
@@ -1771,27 +2177,128 @@ begin
     else
       Desc := 'Success';
   end;
-  Result := AddResponse(Code, Desc, '', 'application/json');
+  Result := AddResponse(Code, Desc, '', MEDIA_TYPE_JSON);
 end;
 
 function THTTPDocRoute.Consumes(const AModelName: string; Required: Boolean; const ADescription: string): THTTPDocRoute;
+var
+  M: Integer;
 begin
-  Result := SetBodyContentRef(AModelName, Required, 'application/json', ADescription);
+  if Length(FDefaultConsumesMediaTypes) > 0 then
+  begin
+    for M := Low(FDefaultConsumesMediaTypes) to High(FDefaultConsumesMediaTypes) do
+      SetBodyContentRef(AModelName, Required, FDefaultConsumesMediaTypes[M], ADescription);
+    Result := Self;
+  end
+  else
+    Result := SetBodyContentRef(AModelName, Required, MEDIA_TYPE_JSON, ADescription);
+end;
+
+function THTTPDocRoute.Consumes(const AModelName: string; const AMediaTypes: array of string; Required: Boolean; const ADescription: string): THTTPDocRoute;
+var
+  M: Integer;
+begin
+  if Length(AMediaTypes) = 0 then
+    Result := Consumes(AModelName, Required, ADescription)
+  else
+  begin
+    for M := Low(AMediaTypes) to High(AMediaTypes) do
+      SetBodyContentRef(AModelName, Required, AMediaTypes[M], ADescription);
+    Result := Self;
+  end;
+end;
+
+function THTTPDocRoute.Consumes(const AMediaTypes: array of string): THTTPDocRoute;
+var
+  M: Integer;
+  ExistingModel: string;
+begin
+  ExistingModel := '';
+  if FBodyContents.Count > 0 then
+    ExistingModel := FBodyContents[0].Content
+  else if not FBodyContent.Content.IsEmpty then
+    ExistingModel := FBodyContent.Content;
+
+  for M := Low(AMediaTypes) to High(AMediaTypes) do
+    SetBodyContent(ExistingModel, FBodyContent.Required, AMediaTypes[M], FBodyContent.Description);
+  Result := Self;
 end;
 
 function THTTPDocRoute.ConsumesJson(const AModelName: string; Required: Boolean; const ADescription: string): THTTPDocRoute;
 begin
-  Result := SetBodyContentRef(AModelName, Required, 'application/json', ADescription);
+  Result := SetBodyContentRef(AModelName, Required, MEDIA_TYPE_JSON, ADescription);
 end;
 
 function THTTPDocRoute.ConsumesFormData(const ADescription: string): THTTPDocRoute;
 begin
-  Result := SetBodyContent('', True, 'application/x-www-form-urlencoded', ADescription);
+  Result := SetBodyContent('', True, MEDIA_TYPE_FORM, ADescription);
 end;
 
 function THTTPDocRoute.ConsumesMultipart(const ADescription: string): THTTPDocRoute;
 begin
-  Result := SetBodyContent('', True, 'multipart/form-data', ADescription);
+  Result := SetBodyContent('', True, MEDIA_TYPE_MULTIPART, ADescription);
+end;
+
+function THTTPDocRoute.AcceptsGzip(Required: Boolean): THTTPDocRoute;
+begin
+  Result := AcceptsEncoding(ENCODING_GZIP, Required);
+end;
+
+function THTTPDocRoute.AcceptsEncoding(const AEncoding: string; Required: Boolean): THTTPDocRoute;
+begin
+  if FindParam('Accept-Encoding') = nil then
+    Result := AddHeaderParam('Accept-Encoding', Required, 'string', AEncoding, 'Accepted content encoding (e.g. gzip, deflate)')
+  else
+    Result := Self;
+end;
+
+function THTTPDocRoute.ProducesEncoding(const AEncoding: string; Code: Integer): THTTPDocRoute;
+begin
+  Result := AddResponseHeader(Code, 'Content-Encoding', 'string', 'Payload compression format', AEncoding);
+end;
+
+function THTTPDocRoute.ProducesGzip(Code: Integer): THTTPDocRoute;
+begin
+  Result := ProducesEncoding(ENCODING_GZIP, Code);
+end;
+
+function THTTPDocRoute.AddResponseHeader(Code: Integer; const AName, AType: string; const ADescription: string; const ADefault: string): THTTPDocRoute;
+begin
+  Result := AddResponseHeader(Code.ToString, AName, AType, ADescription, ADefault);
+end;
+
+function THTTPDocRoute.AddResponseHeader(const ACode: string; const AName, AType: string; const ADescription: string; const ADefault: string): THTTPDocRoute;
+var
+  Resp: TDocResponse;
+begin
+  Resp := FindResponse(ACode);
+  if Resp = nil then
+  begin
+    AddResponse(ACode, '', '', MEDIA_TYPE_JSON);
+    Resp := FindResponse(ACode);
+  end;
+  if Resp <> nil then
+    Resp.AddOrUpdateHeader(AName, AType, ADescription, ADefault);
+  InvalidateCache;
+  Result := Self;
+end;
+
+procedure THTTPDocRoute.SetDefaultMediaTypes(const AMediaTypes: array of string);
+var
+  I: Integer;
+begin
+  SetLength(FDefaultMediaTypes, Length(AMediaTypes));
+  for I := Low(AMediaTypes) to High(AMediaTypes) do
+    FDefaultMediaTypes[I - Low(AMediaTypes)] := AMediaTypes[I];
+end;
+
+procedure THTTPDocRoute.SetDefaultConsumesMediaTypes(const AMediaTypes: array of string);
+var
+  I: Integer;
+begin
+  SetLength(FDefaultConsumesMediaTypes, Length(AMediaTypes));
+  for I := Low(AMediaTypes) to High(AMediaTypes) do
+    FDefaultConsumesMediaTypes[I - Low(AMediaTypes)] := AMediaTypes[I];
 end;
 
 function THTTPDocRoute.ProducesProblem(ACode: Integer): THTTPDocRoute;
@@ -1928,6 +2435,10 @@ begin
   FCacheLock := TCriticalSection.Create; // Inicializa o Lock
   FGroups := TFPObjectList.Create(True);
   FDefaultCustomHeaders := TStringList.Create;
+  SetLength(FDefaultMediaTypes, 0);
+  SetLength(FDefaultConsumesMediaTypes, 0);
+  SetLength(FDefaultEncodings, 0);
+  FEnableGzip := False;
   FComponents := TSwaggerComponents.Create;
   FServers := TJSONArray.Create;
   FTitle := 'API';
@@ -1996,10 +2507,26 @@ end;
 function TSwaggerRouter.RegisterRoute(const APattern: String;
   AMethod: TRouteMethod; ACallBack: TRouteCallBack; IsDefault: Boolean
   ): THTTPDocRoute;
+var
+  I: Integer;
 begin
   FCacheLock.Acquire;
   try
     Result := HTTPRouter.RegisterDocRoute(APattern, AMethod, ACallBack, IsDefault);
+    if Length(FDefaultMediaTypes) > 0 then
+      Result.SetDefaultMediaTypes(FDefaultMediaTypes);
+    if Length(FDefaultConsumesMediaTypes) > 0 then
+      Result.SetDefaultConsumesMediaTypes(FDefaultConsumesMediaTypes);
+    if FEnableGzip then
+    begin
+      Result.AcceptsGzip(False);
+      Result.ProducesEncoding('gzip');
+    end;
+    for I := 0 to High(FDefaultEncodings) do
+    begin
+      Result.AcceptsEncoding(FDefaultEncodings[I], False);
+      Result.ProducesEncoding(FDefaultEncodings[I]);
+    end;
     FDocCache := '';
     FDocCacheBasePath := '';
   finally
@@ -2060,6 +2587,8 @@ end;
 constructor TSwaggerRouteGroup.Create(ARouter: TSwaggerRouter; const APrefix: string);
 var
   Clean: string;
+  I: Integer;
+  RMedia, RConsumes, REncodings: TStringDynArray;
 begin
   inherited Create;
   FRouter := ARouter;
@@ -2074,6 +2603,33 @@ begin
   FApiKeyHeader := 'X-API-Key';
   FHasSecurity := False;
   SetLength(FProblemCodes, 0);
+
+  FEnableGzip := False;
+  if ARouter <> nil then
+  begin
+    FEnableGzip := ARouter.IsGzipEnabled;
+
+    RMedia := ARouter.GetDefaultMediaTypes;
+    SetLength(FDefaultMediaTypes, Length(RMedia));
+    for I := 0 to High(RMedia) do
+      FDefaultMediaTypes[I] := RMedia[I];
+
+    RConsumes := ARouter.GetDefaultConsumesMediaTypes;
+    SetLength(FDefaultConsumesMediaTypes, Length(RConsumes));
+    for I := 0 to High(RConsumes) do
+      FDefaultConsumesMediaTypes[I] := RConsumes[I];
+
+    REncodings := ARouter.GetDefaultEncodings;
+    SetLength(FDefaultEncodings, Length(REncodings));
+    for I := 0 to High(REncodings) do
+      FDefaultEncodings[I] := REncodings[I];
+  end
+  else
+  begin
+    SetLength(FDefaultMediaTypes, 0);
+    SetLength(FDefaultConsumesMediaTypes, 0);
+    SetLength(FDefaultEncodings, 0);
+  end;
 end;
 
 function TSwaggerRouteGroup.CombinePath(const ASubPattern: string): string;
@@ -2111,6 +2667,24 @@ begin
 
   for I := 0 to High(FProblemCodes) do
     ARoute.ProducesProblem(FProblemCodes[I]);
+
+  if Length(FDefaultMediaTypes) > 0 then
+    ARoute.SetDefaultMediaTypes(FDefaultMediaTypes);
+
+  if Length(FDefaultConsumesMediaTypes) > 0 then
+    ARoute.SetDefaultConsumesMediaTypes(FDefaultConsumesMediaTypes);
+
+  if FEnableGzip then
+  begin
+    ARoute.AcceptsGzip(False);
+    ARoute.ProducesEncoding('gzip');
+  end;
+
+  for I := 0 to High(FDefaultEncodings) do
+  begin
+    ARoute.AcceptsEncoding(FDefaultEncodings[I], False);
+    ARoute.ProducesEncoding(FDefaultEncodings[I]);
+  end;
 
   Result := ARoute;
 end;
@@ -2173,6 +2747,64 @@ begin
   Result := Self;
 end;
 
+function TSwaggerRouteGroup.ProducesMediaTypes(const AMediaTypes: array of string): TSwaggerRouteGroup;
+var
+  I: Integer;
+begin
+  SetLength(FDefaultMediaTypes, Length(AMediaTypes));
+  for I := Low(AMediaTypes) to High(AMediaTypes) do
+    FDefaultMediaTypes[I - Low(AMediaTypes)] := AMediaTypes[I];
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.ConsumesMediaTypes(const AMediaTypes: array of string): TSwaggerRouteGroup;
+var
+  I: Integer;
+begin
+  SetLength(FDefaultConsumesMediaTypes, Length(AMediaTypes));
+  for I := Low(AMediaTypes) to High(AMediaTypes) do
+    FDefaultConsumesMediaTypes[I - Low(AMediaTypes)] := AMediaTypes[I];
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.AcceptsGzip(Required: Boolean): TSwaggerRouteGroup;
+begin
+  AcceptsEncoding(ENCODING_GZIP, Required);
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.AcceptsEncoding(const AEncoding: string; Required: Boolean): TSwaggerRouteGroup;
+var
+  Len, I: Integer;
+begin
+  for I := 0 to High(FDefaultEncodings) do
+    if SameText(FDefaultEncodings[I], AEncoding) then
+      Exit(Self);
+  Len := Length(FDefaultEncodings);
+  SetLength(FDefaultEncodings, Len + 1);
+  FDefaultEncodings[Len] := AEncoding;
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.ProducesEncoding(const AEncoding: string): TSwaggerRouteGroup;
+var
+  Len, I: Integer;
+begin
+  for I := 0 to High(FDefaultEncodings) do
+    if SameText(FDefaultEncodings[I], AEncoding) then
+      Exit(Self);
+  Len := Length(FDefaultEncodings);
+  SetLength(FDefaultEncodings, Len + 1);
+  FDefaultEncodings[Len] := AEncoding;
+  Result := Self;
+end;
+
+function TSwaggerRouteGroup.EnableGzip(AEnabled: Boolean): TSwaggerRouteGroup;
+begin
+  FEnableGzip := AEnabled;
+  Result := Self;
+end;
+
 function TSwaggerRouteGroup.Get(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
 begin
   Result := ApplyGroupSettings(FRouter.Get(CombinePath(ASubPattern), ACallBack));
@@ -2206,6 +2838,81 @@ end;
 function TSwaggerRouteGroup.Head(const ASubPattern: string; ACallBack: TRouteCallBack): THTTPDocRoute;
 begin
   Result := ApplyGroupSettings(FRouter.Head(CombinePath(ASubPattern), ACallBack));
+end;
+
+function TSwaggerRouter.SetDefaultMediaTypes(const AMediaTypes: array of string): TSwaggerRouter;
+var
+  I: Integer;
+begin
+  SetLength(FDefaultMediaTypes, Length(AMediaTypes));
+  for I := Low(AMediaTypes) to High(AMediaTypes) do
+    FDefaultMediaTypes[I - Low(AMediaTypes)] := AMediaTypes[I];
+  ClearCache;
+  Result := Self;
+end;
+
+function TSwaggerRouter.SetDefaultConsumesMediaTypes(const AMediaTypes: array of string): TSwaggerRouter;
+var
+  I: Integer;
+begin
+  SetLength(FDefaultConsumesMediaTypes, Length(AMediaTypes));
+  for I := Low(AMediaTypes) to High(AMediaTypes) do
+    FDefaultConsumesMediaTypes[I - Low(AMediaTypes)] := AMediaTypes[I];
+  ClearCache;
+  Result := Self;
+end;
+
+function TSwaggerRouter.SetDefaultEncodings(const AEncodings: array of string): TSwaggerRouter;
+var
+  I: Integer;
+begin
+  SetLength(FDefaultEncodings, Length(AEncodings));
+  for I := Low(AEncodings) to High(AEncodings) do
+    FDefaultEncodings[I - Low(AEncodings)] := AEncodings[I];
+  ClearCache;
+  Result := Self;
+end;
+
+function TSwaggerRouter.EnableGzip(AEnabled: Boolean): TSwaggerRouter;
+begin
+  FEnableGzip := AEnabled;
+  ClearCache;
+  Result := Self;
+end;
+
+function TSwaggerRouter.IsGzipEnabled: Boolean;
+begin
+  Result := FEnableGzip;
+end;
+
+function TSwaggerRouter.GetDefaultMediaTypes: TStringDynArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(FDefaultMediaTypes));
+  for I := 0 to High(FDefaultMediaTypes) do
+    Result[I] := FDefaultMediaTypes[I];
+end;
+
+function TSwaggerRouter.GetDefaultConsumesMediaTypes: TStringDynArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(FDefaultConsumesMediaTypes));
+  for I := 0 to High(FDefaultConsumesMediaTypes) do
+    Result[I] := FDefaultConsumesMediaTypes[I];
+end;
+
+function TSwaggerRouter.GetDefaultEncodings: TStringDynArray;
+var
+  I: Integer;
+begin
+  Result := nil;
+  SetLength(Result, Length(FDefaultEncodings));
+  for I := 0 to High(FDefaultEncodings) do
+    Result[I] := FDefaultEncodings[I];
 end;
 
 function TSwaggerRouter.HasModel(const AName: string): Boolean;

@@ -19,23 +19,40 @@ begin
 
 end;
 
+procedure CreateTodo(AReq: TRequest; AResp: TResponse);
+begin
+
+end;
+
 initialization
 
 SwaggerRouter
   .EnsureModel('Todo', '{"type": "object", "properties": {"id": {"type": "integer"}, "title": {"type": "string"}, "completed": {"type": "boolean"}}}');
 
+// Rota GET com múltiplos formatos de serialização e compressão GZIP
 SwaggerRouter
   .RegisterRoute('todo', rmGet, @GetTodos, False)
-  .AddResponseRefArray(200, 'Todo', 'Ok')
-  .SetSummary('Get all TODOs')
-  .AddTags('Todo');
+  .SetSummary('Get all TODOs in multiple formats')
+  .AddTags('Todo')
+  .Produces(200, 'Todo', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON, MEDIA_TYPE_XML, MEDIA_TYPE_CSV], 'List of todos')
+  .AcceptsGzip
+  .ProducesGzip;
 
+// Rota GET por ID
 SwaggerRouter
   .RegisterRoute('todo/:id', rmGet, @GetTodo, False)
-  .AddResponseRef(200, 'Todo', 'Ok')
   .SetSummary('Get todo by ID')
   .AddTags('Todo')
-  .AddParam('id', 'id');
+  .AddPathParam('id', True, 'integer', '1', 'ID do Todo')
+  .Produces(200, 'Todo', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Todo localizado');
+
+// Rota POST com payload em múltiplos formatos
+SwaggerRouter
+  .RegisterRoute('todo', rmPost, @CreateTodo, False)
+  .SetSummary('Create a new TODO item')
+  .AddTags('Todo')
+  .Consumes('Todo', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON], True, 'Todo payload')
+  .Produces(201, 'Todo', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Todo created');
 
 end.
 

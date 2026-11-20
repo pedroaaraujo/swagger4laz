@@ -170,17 +170,20 @@ SwaggerRouter.Get('/api/v1/busqueda/:categoria', @HandleBusqueda)
 Declare formatos de entrada previstos para JSON, formatos binarios (CBOR, BSON), XML y formularios:
 
 ```pascal
+// Declaración fluida de payload de entrada en múltiples formatos
+Route.Consumes('ProductoInput', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON], True, 'Datos del producto');
+
 // Payload JSON estándar referenciando components.schemas/ProductoInput
 Route.ConsumesJson('ProductoInput', True, 'Datos del producto en JSON');
 
 // Payload binario CBOR (RFC 8949)
-Route.SetBodyContentRef('ProductoInput', True, 'application/cbor', 'Payload binario CBOR');
+Route.SetBodyContentRef('ProductoInput', True, MEDIA_TYPE_CBOR, 'Payload binario CBOR');
 
 // Payload binario BSON (v1.1)
-Route.SetBodyContentRef('ProductoInput', True, 'application/bson', 'Documento binario BSON');
+Route.SetBodyContentRef('ProductoInput', True, MEDIA_TYPE_BSON, 'Documento binario BSON');
 
 // Payload XML corporativo
-Route.SetBodyContentRef('ProductoInput', True, 'application/xml', 'Documento XML');
+Route.SetBodyContentRef('ProductoInput', True, MEDIA_TYPE_XML, 'Documento XML');
 
 // Datos en formulario estándar (application/x-www-form-urlencoded)
 Route.ConsumesFormData('Formulario de inicio de sesión');
@@ -196,25 +199,42 @@ Route.ConsumesMultipart('Subida de archivos adjuntos');
 Swagger4Laz permite vincular múltiples representaciones bajo el mismo código de estado HTTP, permitiendo una documentación OpenAPI 3.1 rigurosa para endpoints con negociación de contenido vía cabecera `Accept`:
 
 ```pascal
-// Referencia a objeto único en JSON (predeterminado)
-Route.Produces(200, 'Producto', 'Operación ejecutada con éxito');
+// Definición fluida de respuesta multiformato en una sola llamada:
+Route.Produces(200, 'Producto', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON, MEDIA_TYPE_XML, MEDIA_TYPE_CSV], 'Producto en múltiples formatos');
 
-// Definiciones de respuestas multiformato:
+// Encadenamiento fluido entre media types:
 Route
-  .AddResponseRef(200, 'Producto', 'Respuesta estándar en JSON', 'application/json')
-  .AddResponseRef(200, 'Producto', 'Payload binario CBOR de alto rendimiento', 'application/cbor')
-  .AddResponseRef(200, 'Producto', 'Documento binario BSON', 'application/bson')
-  .AddResponseRef(200, 'Producto', 'Documento XML corporativo', 'application/xml')
-  .AddResponseRefArray(200, 'Producto', 'Exportación tabular en CSV', 'text/csv');
+  .Produces(200, 'Producto', 'Respuesta estándar en JSON')
+  .Produces([MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON]);
 
-// Lista simple: { type: "array", items: { $ref: #/components/schemas/Producto } }
-Route.ProducesArray(200, 'Producto', 'Lista de productos');
+// Listas y envoltorios paginados en múltiples formatos:
+Route.ProducesArray(200, 'Producto', [MEDIA_TYPE_JSON, MEDIA_TYPE_CSV], 'Lista de productos y exportación CSV');
+Route.ProducesPaginated(200, 'Producto', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Productos paginados');
 
-// Envoltorio paginado: { type: "object", properties: { items: [...], total_records: ... } }
-Route.ProducesPaginated(200, 'Producto', 'Respuesta paginada');
+// Cabeceras de compresión y codificación de contenido:
+Route
+  .AcceptsGzip     // Documenta parámetro de cabecera 'Accept-Encoding: gzip'
+  .ProducesGzip;   // Documenta cabecera de respuesta 'Content-Encoding: gzip' en 200
 
 // Respuesta sin contenido (HTTP 204)
 Route.ProducesEmpty(204, 'Registro eliminado');
+```
+
+### Defaults Fluidos en Route Groups y Router
+
+Elimine repetición de código declarando media types y parámetros de compresión directamente en el router o en los grupos de rutas:
+
+```pascal
+// Defaults a nivel de grupo heredados automáticamente por todas las rutas hijas:
+Api := SwaggerRouter.Group('/api/v1/catalogo')
+  .Tag('Catalogo')
+  .ProducesMediaTypes([MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON])
+  .ConsumesMediaTypes([MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR])
+  .EnableGzip;
+
+// Documenta automáticamente salidas JSON, CBOR, BSON y compresión GZIP:
+Api.Get('/productos', @HandleListProductos)
+   .Produces(200, 'Producto', 'Artículos del catálogo');
 ```
 
 ### Panorama de Tradeoffs de Media Types

@@ -67,32 +67,44 @@ begin
   SwaggerRouter.EnsureModel('TodoItem', '{"type": "object", "properties": {"id": {"type": "integer"}}}');
   AssertTrue(SwaggerRouter.HasModel('TodoItem'), 'EnsureModel é idempotente e não falha');
 
-  // 3. Registro de Rotas com métodos Ref
+  // 3. Registro de Rotas com métodos Ref e Múltiplos Media Types
   SwaggerRouter
     .Get('/todos/:id', @DummyHandler)
     .SetSummary('Buscar Todo')
     .AddTags('Todos')
     .AddPathParam('id', True, 'integer', '1', 'ID do item')
-    .AddResponseRef(200, 'TodoItem', 'Todo localizado');
+    .Produces(200, 'TodoItem', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON, MEDIA_TYPE_XML, MEDIA_TYPE_CSV], 'Todo localizado em múltiplos formatos')
+    .AcceptsGzip
+    .ProducesGzip;
 
   SwaggerRouter
     .Get('/todos', @DummyHandler)
     .SetSummary('Listar Todos')
     .AddTags('Todos')
-    .AddResponseRefArray(200, 'TodoItem', 'Lista de todos');
+    .AddResponseRefArray(200, 'TodoItem', 'Lista de todos')
+    .Produces([MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON]);
 
   SwaggerRouter
     .Get('/todos/paginados', @DummyHandler)
     .SetSummary('Listar Todos Paginados')
     .AddTags('Todos')
-    .AddResponseRefPaginated(200, 'TodoItem', 'Todos paginados');
+    .ProducesPaginated(200, 'TodoItem', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Todos paginados');
 
   SwaggerRouter
     .Post('/todos', @DummyHandler)
     .SetSummary('Criar Todo')
     .AddTags('Todos')
-    .SetBodyContentRef('TodoItem', True, 'application/json', 'Dados de criação')
-    .AddResponseRef(201, 'TodoItem', 'Criado com sucesso');
+    .Consumes('TodoItem', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON], True, 'Dados de criação')
+    .Produces(201, 'TodoItem', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Criado com sucesso');
+
+  // Teste de TSwaggerRouteGroup com Defaults Fluentes
+  SwaggerRouter
+    .Group('/api/v2')
+    .Tag('V2')
+    .ProducesMediaTypes([MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR])
+    .EnableGzip
+    .Get('/items', @DummyHandler)
+    .Produces(200, 'TodoItem', 'Items v2');
 
   // 4. Verificação do OpenAPI JSON gerado
   JsonDoc := SwaggerRouter.BuildOpenAPISpecification;
@@ -118,6 +130,17 @@ begin
     Paths := Doc.Get('paths', TJSONObject(nil));
     AssertTrue(Assigned(Paths), 'OpenAPI possui paths documentados');
     AssertTrue(Pos('#/components/schemas/TodoItem', JsonDoc) > 0, 'OpenAPI contém referências canônicas $ref');
+
+    // Validações de Múltiplos Media Types e Encodings
+    AssertTrue(Pos('application/json', JsonDoc) > 0, 'OpenAPI contém application/json');
+    AssertTrue(Pos('application/cbor', JsonDoc) > 0, 'OpenAPI contém application/cbor');
+    AssertTrue(Pos('application/bson', JsonDoc) > 0, 'OpenAPI contém application/bson');
+    AssertTrue(Pos('application/xml', JsonDoc) > 0, 'OpenAPI contém application/xml');
+    AssertTrue(Pos('text/csv', JsonDoc) > 0, 'OpenAPI contém text/csv');
+    AssertTrue(Pos('Accept-Encoding', JsonDoc) > 0, 'OpenAPI contém parâmetro de cabeçalho Accept-Encoding');
+    AssertTrue(Pos('Content-Encoding', JsonDoc) > 0, 'OpenAPI contém cabeçalho de resposta Content-Encoding');
+    AssertTrue(Pos('gzip', JsonDoc) > 0, 'OpenAPI contém encoding gzip');
+    AssertTrue(Pos('/api/v2/items', JsonDoc) > 0, 'OpenAPI contém rota de grupo /api/v2/items');
   finally
     Doc.Free;
   end;

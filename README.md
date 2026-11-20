@@ -170,17 +170,20 @@ SwaggerRouter.Get('/api/v1/search/:category', @HandleSearch)
 Declare expected input payloads for JSON, binary formats (CBOR, BSON), XML, and form uploads:
 
 ```pascal
+// Fluent multi-format input payload declaration
+Route.Consumes('ProductInput', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON], True, 'Product payload');
+
 // Standard JSON payload referencing components.schemas/ProductInput
 Route.ConsumesJson('ProductInput', True, 'JSON product payload');
 
 // Binary CBOR payload (RFC 8949)
-Route.SetBodyContentRef('ProductInput', True, 'application/cbor', 'Binary CBOR payload');
+Route.SetBodyContentRef('ProductInput', True, MEDIA_TYPE_CBOR, 'Binary CBOR payload');
 
 // Binary BSON payload (v1.1)
-Route.SetBodyContentRef('ProductInput', True, 'application/bson', 'Binary BSON document');
+Route.SetBodyContentRef('ProductInput', True, MEDIA_TYPE_BSON, 'Binary BSON document');
 
 // XML payload
-Route.SetBodyContentRef('ProductInput', True, 'application/xml', 'XML document payload');
+Route.SetBodyContentRef('ProductInput', True, MEDIA_TYPE_XML, 'XML document payload');
 
 // Form data payload (application/x-www-form-urlencoded)
 Route.ConsumesFormData('User login form');
@@ -196,25 +199,42 @@ Route.ConsumesMultipart('File attachment payload');
 Swagger4Laz models multiple representations under the same HTTP status code, enabling accurate OpenAPI 3.1 documentation for endpoints supporting content negotiation (`Accept` header):
 
 ```pascal
-// Single object reference in JSON (default)
-Route.Produces(200, 'Product', 'Operation succeeded');
+// Fluent multi-format response definition in a single call:
+Route.Produces(200, 'Product', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON, MEDIA_TYPE_XML, MEDIA_TYPE_CSV], 'Multi-format product');
 
-// Multi-format response definitions:
+// Fluent chaining across media types:
 Route
-  .AddResponseRef(200, 'Product', 'Standard JSON response', 'application/json')
-  .AddResponseRef(200, 'Product', 'High-throughput binary CBOR', 'application/cbor')
-  .AddResponseRef(200, 'Product', 'Document binary BSON', 'application/bson')
-  .AddResponseRef(200, 'Product', 'Enterprise XML document', 'application/xml')
-  .AddResponseRefArray(200, 'Product', 'Tabular CSV report export', 'text/csv');
+  .Produces(200, 'Product', 'Standard JSON response')
+  .Produces([MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON]);
 
-// Array response: { type: "array", items: { $ref: #/components/schemas/Product } }
-Route.ProducesArray(200, 'Product', 'List of products');
+// Array and paginated responses in multiple formats:
+Route.ProducesArray(200, 'Product', [MEDIA_TYPE_JSON, MEDIA_TYPE_CSV], 'Product list and CSV export');
+Route.ProducesPaginated(200, 'Product', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Paginated products');
 
-// Paginated envelope: { type: "object", properties: { items: [...], total_records: ... } }
-Route.ProducesPaginated(200, 'Product', 'Paginated response');
+// Compression and content encoding headers:
+Route
+  .AcceptsGzip     // Documents 'Accept-Encoding: gzip' header parameter
+  .ProducesGzip;   // Documents 'Content-Encoding: gzip' in 200 response
 
 // No-content response (HTTP 204)
 Route.ProducesEmpty(204, 'Entity deleted');
+```
+
+### Route Group & Router Defaults
+
+Eliminate repetitive boilerplate across routes by declaring media types and compression defaults at the router or group level:
+
+```pascal
+// Group-level defaults automatically inherited by all child routes:
+Api := SwaggerRouter.Group('/api/v1/catalog')
+  .Tag('Catalog')
+  .ProducesMediaTypes([MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON])
+  .ConsumesMediaTypes([MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR])
+  .EnableGzip;
+
+// Automatically documents JSON, CBOR, BSON and GZIP compression:
+Api.Get('/products', @HandleListProducts)
+   .Produces(200, 'Product', 'Catalog items');
 ```
 
 ### Media Types Tradeoffs Overview
