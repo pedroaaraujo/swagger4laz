@@ -1,364 +1,275 @@
 <p align="right">
-  <b>Language / Idioma:</b>
-  <a href="README.md">English</a> |
-  <a href="README.pt-BR.md">Português (Brasil)</a> |
-  <a href="README.es-ES.md">Español</a>
+  [ English ](README.md) | [ Português (Brasil) ](README.pt-BR.md) | [ Español ](README.es-ES.md)
 </p>
 
 # Swagger4Laz
 
-[![Lazarus](https://img.shields.io/badge/Lazarus-2.2%2B-blue.svg)](https://www.lazarus-ide.org/)
-[![FreePascal](https://img.shields.io/badge/FPC-3.2.2%2B-green.svg)](https://www.freepascal.org/)
-[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1.0-brightgreen.svg)](https://swagger.io/specification/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![FPC](https://img.shields.io/badge/FPC-%3E%3D%203.2.2-blue.svg)](https://www.freepascal.org/)
+[![Lazarus](https://img.shields.io/badge/Lazarus-%3E%3D%203.0-orange.svg)](https://www.lazarus-ide.org/)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-brightgreen.svg)](https://swagger.io/specification/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**Swagger4Laz** es una biblioteca moderna y fluida para **Lazarus / Free Pascal (FPC)** diseñada para integrarse a la perfección con **FCL-Web** (`httproute.THTTPRouter`). Automatiza la generación de la especificación **OpenAPI 3.1** (`openapi.json`) y sirve directamente la interfaz visual de **Swagger UI** desde el binario nativo compilado, eliminando la necesidad de servidores auxiliares (como Node.js) o herramientas externas.
-
----
-
-## ✨ Características
-
-- 📄 **OpenAPI 3.1 Automático**: Genera dinámicamente el archivo `openapi.json` a partir de las rutas registradas.
-- 🎨 **Swagger UI Integrado**: Sirve la interfaz web interactiva de Swagger UI en una ruta configurable (por defecto `/docs`).
-- 🔗 **Enrutamiento Fluido**: Extensión de `THTTPRouter` con llamadas a métodos encadenados (`Get`, `Post`, `Put`, `Delete`, `Patch`).
-- 🎯 **Gestión Exhaustiva de Parámetros**:
-  - Parámetros de ruta con conversión automática de `:param` a notación `{param}`.
-  - Parámetros de consulta (Query), Encabezados (Headers) y Cookies.
-  - Soporte completo para enumeraciones (enums) y valores predeterminados.
-- 📦 **Documentación de Cuerpos y Respuestas**:
-  - Esquemas tipados para el cuerpo de la petición (Request Body).
-  - Múltiples códigos de respuesta HTTP con descripciones y esquemas JSON.
-- 🔒 **Esquemas de Seguridad**:
-  - **Bearer Token (JWT)**
-  - **Autenticación Básica (Basic Auth)**
-  - **API Key** (mediante encabezado HTTP personalizable, ej.: `X-API-Key`)
-- 🌐 **Listo para Proxies Inversos**:
-  - Detección automática de prefijos mediante encabezados `X-Forwarded-Prefix`.
-  - BasePath configurable para entornos en contenedores.
-- 🛡️ **CORS y Encabezados Globales**:
-  - Soporte para encabezados personalizados globales en la documentación y respuestas.
-- ⚡ **Deduplicación y Normalización de Métodos HTTP**:
-  - Agrupa múltiples verbos HTTP bajo la misma ruta y normaliza barras finales.
-- 🌐 **Internacionalización Integrada (i18n)**:
-  - Mensajes de error y excepciones configurables por idioma (`en-US`, `pt-BR`, `es-ES`) mediante `SetSwaggerLocale` o variables de entorno `SWAGGER_LOCALE` / `ZENITH_LOCALE`.
-  - Identificadores y métodos 100% en inglés nativo (`Documentation`, con alias de compatibilidad `Documentacao`).
+Swagger4Laz es una biblioteca de documentación OpenAPI 3.1 y enrutador con Swagger UI integrado para Free Pascal y Lazarus. Extiende el componente `httproute.THTTPRouter` nativo de FPC para declarar rutas tipadas, esquemas de datos, parámetros de solicitud, envoltorios de respuesta y gestión de errores mediante una API fluida en Pascal.
 
 ---
 
-## 📦 Requisitos
+## Especificaciones Técnicas
 
-- **Free Pascal Compiler (FPC)** 3.2.2 o superior.
-- **Lazarus IDE** 2.2 o superior.
-- Paquete **FCL-Web** (incluido en la instalación estándar de FPC).
+- **Compilador**: Free Pascal Compiler (FPC) >= 3.2.2.
+- **IDE / Herramientas**: Lazarus >= 3.0 (`lazbuild`).
+- **Sistemas Operativos**: Linux (x86_64, aarch64), Windows (x86_64, i386), macOS (x86_64, arm64).
+- **Estándares Compatibles**: OpenAPI 3.1.0 y RFC 7807 (Problem Details for HTTP APIs).
+- **Dependencias Internas**: `httproute`, `fpjson`, `jsonparser`, `fgl`, `TypInfo`. Sin dependencias de bibliotecas externas en C.
 
 ---
 
-## 🚀 Inicio Rápido
+## Instalación
 
-### 1. Inicialización Básica
+### Método 1: Gestor de Paquetes de Lazarus
+1. En Lazarus, vaya a `Paquete` -> `Abrir archivo de paquete (.lpk)`.
+2. Seleccione `swagger4laz.lpk`.
+3. Haga clic en `Compilar` y luego en `Usar` -> `Instalar`.
 
-Simplemente importe `swagger4laz` en su unidad o programa principal. La instancia global `SwaggerRouter` estará lista para usarse:
+### Método 2: Ruta Manual de Unidades
+Añada el directorio de `swagger4laz.pas` a la ruta de unidades de su compilador:
+```bash
+fpc -Fu/ruta/a/swagger4laz mi_api.lpr
+```
+
+---
+
+## Guía Rápida (60 Segundos)
+
+API HTTP funcional con documentación interactiva y Swagger UI integrado:
 
 ```pascal
-program MiApi;
+program QuickstartApi;
 
-{$mode ObjFPC}{$H+}
+{$mode Delphi}{$H+}
 
 uses
-  Classes, SysUtils, fphttpapp,
+  {$IFDEF UNIX}cthreads, cmem,{$ENDIF}
+  SysUtils, HTTPDefs, fphttpapp, httproute,
   swagger4laz;
 
+procedure HandleGetUser(AReq: TRequest; AResp: TResponse);
 begin
-  // Configuración de los metadatos de la API
-  SwaggerRouter
-    .SetTitle('Mi API en Lazarus')
-    .SetVersion('1.0.0')
-    .SetDescription('Documentación interactiva generada con Swagger4Laz')
-    .SetDocRoute('/docs') // Endpoint donde se sirve Swagger UI
-    .AddServer('http://localhost:8080', 'Servidor Local de Desarrollo');
+  AResp.Code := 200;
+  AResp.ContentType := 'application/json';
+  AResp.Content := '{"id":' + AReq.RouteParams['id'] + ',"name":"Carlos García"}';
+end;
 
+begin
+  // Metadatos de OpenAPI
+  SwaggerRouter
+    .SetTitle('API de Usuarios')
+    .SetVersion('1.0.0')
+    .SetDescription('Servicio de gestión de cuentas')
+    .SetDocRoute('/docs'); // Publica Swagger UI en /docs y la especificación en /docs/openapi.json
+
+  // Registro del esquema en components.schemas
+  SwaggerRouter.EnsureModel(
+    'User',
+    '{"type":"object","properties":{"id":{"type":"integer"},"name":{"type":"string"}}}'
+  );
+
+  // Registro y documentación de la ruta
+  SwaggerRouter
+    .Get('/api/v1/users/:id', @HandleGetUser)
+    .SetSummary('Buscar usuario por ID')
+    .Tag('Users')
+    .PathParam('id', 'integer', 'Identificador numérico del usuario')
+    .Produces(200, 'User', 'Usuario localizado')
+    .ProducesProblem(404);
+
+  // Inicialización del servidor en el puerto 8080
   Application.Port := 8080;
+  Application.Threaded := True;
   Application.Initialize;
   Application.Run;
 end.
 ```
 
-Abra su navegador en:
-- Swagger UI: `http://localhost:8080/docs`
-- OpenAPI JSON: `http://localhost:8080/docs/openapi.json`
-
-El documento JSON se expone automáticamente bajo la ruta configurada. Por ejemplo, `SetDocRoute('/api/docs')` registrará el archivo en `/api/docs/openapi.json`.
+Abra `http://localhost:8080/docs` en su navegador para interactuar con la interfaz.
 
 ---
 
-### 2. Registro de Rutas con Documentación
+## API de Enrutamiento
 
-La API fluida permite encadenar metadatos, parámetros de consulta, cuerpos de petición y respuestas:
+### Registro de Rutas
+`SwaggerRouter` implementa los métodos estándar correspondientes a `httproute`:
 
 ```pascal
-uses
-  HTTPDefs, swagger4laz;
-
-// Controlador para listar usuarios
-procedure GetUsers(ARequest: TRequest; AResponse: TResponse);
-begin
-  AResponse.Code := 200;
-  AResponse.ContentType := 'application/json';
-  AResponse.Content := '[{"id": 1, "name": "Juan"}]';
-end;
-
-// Controlador para crear usuario
-procedure CreateUser(ARequest: TRequest; AResponse: TResponse);
-begin
-  AResponse.Code := 201;
-  AResponse.ContentType := 'application/json';
-  AResponse.Content := '{"id": 2, "name": "María"}';
-end;
-
-procedure RegisterRoutes;
-begin
-  // GET /users con parámetros de consulta y respuesta
-  SwaggerRouter
-    .Get('/users', @GetUsers)
-    .SetSummary('Lista de usuarios registrados')
-    .SetDescription('Devuelve una lista paginada de usuarios')
-    .AddTags('Usuarios')
-    .AddQueryParam('page', False, 'integer', '1', 'Número de página')
-    .AddQueryParam('limit', False, 'integer', '10', 'Cantidad de registros por página')
-    .AddResponse(200, 'Lista de usuarios devuelta con éxito', '[{"id":1,"name":"string"}]');
-
-  // POST /users con cuerpo de petición y seguridad Bearer JWT
-  SwaggerRouter
-    .Post('/users', @CreateUser)
-    .SetSummary('Registra un nuevo usuario')
-    .AddTags('Usuarios')
-    .SetSecurityBearer
-    .SetBodyContent('{"name": "string", "email": "string"}', True, 'application/json', 'Datos del usuario')
-    .AddResponse(201, 'Usuario creado con éxito')
-    .AddResponse(400, 'Datos de solicitud inválidos');
-end;
+SwaggerRouter.Get('/items', @HandleListItems);
+SwaggerRouter.Post('/items', @HandleCreateItem);
+SwaggerRouter.Put('/items/:id', @HandleUpdateItem);
+SwaggerRouter.Delete('/items/:id', @HandleDeleteItem);
+SwaggerRouter.Patch('/items/:id', @HandlePatchItem);
 ```
 
----
-
-### 3. Parámetros de Ruta (Path Parameters)
-
-Declare parámetros de ruta precedidos por dos puntos (`:param`). Swagger4Laz los transformará automáticamente a la notación `{param}` de OpenAPI y registrará la ruta en `THTTPRouter`:
+### Grupos de Rutas (`TSwaggerRouteGroup`)
+Los grupos permiten compartir prefijos de URL, etiquetas, esquemas de autenticación y códigos de error entre múltiples endpoints:
 
 ```pascal
-procedure GetUserById(ARequest: TRequest; AResponse: TResponse);
 var
-  UserId: string;
+  Api: TSwaggerRouteGroup;
 begin
-  UserId := ARequest.RouteParams['id'];
-  AResponse.Code := 200;
-  AResponse.ContentType := 'application/json';
-  AResponse.Content := Format('{"id": %s, "name": "Juan"}', [UserId]);
-end;
+  Api := SwaggerRouter.Group('/api/v1/clientes')
+           .Tag('Clientes')
+           .SecurityBearer
+           .Problem(400)
+           .Problem(401)
+           .Problem(404);
 
-procedure RegisterUserRoute;
-begin
-  SwaggerRouter
-    .Get('/users/:id', @GetUserById)
-    .SetSummary('Obtener usuario por ID')
-    .AddTags('Usuarios')
-    .AddPathParam('id', True, 'integer', '', 'Identificador único del usuario')
-    .AddResponse(200, 'Usuario encontrado')
-    .AddResponse(404, 'Usuario no encontrado');
-end;
-```
+  // Hereda prefijo '/api/v1/clientes', etiqueta 'Clientes', autenticación Bearer y errores 400/401/404
+  Api.Get('', @HandleListarClientes)
+     .ProducesPaginated(200, 'Cliente', 'Lista paginada de clientes');
 
----
+  Api.Get('/:id', @HandleBuscarCliente)
+     .PathParam('id', 'integer', 'ID del cliente')
+     .Produces(200, 'Cliente', 'Datos del cliente');
 
-### 4. Parámetros Enum y Encabezados
+  Api.Post('', @HandleCrearCliente)
+     .ConsumesJson('ClienteInput', True, 'Carga útil de registro')
+     .Produces(201, 'Cliente', 'Cliente creado');
 
-```pascal
-SwaggerRouter
-  .Get('/orders', @GetOrders)
-  .AddTags('Pedidos')
-  .AddEnumParam('status', ['PENDING', 'APPROVED', 'CANCELLED'], False, piQuery, 'PENDING', 'Filtro por estado del pedido')
-  .AddHeaderParam('X-Tenant-ID', True, 'string', '', 'Identificador del Tenant')
-  .AddResponse(200, 'Pedidos filtrados');
-```
-
----
-
-### 5. Esquemas de Seguridad
-
-Defina autenticación por ruta o de manera global:
-
-```pascal
-// Bearer Token (JWT)
-Router.Get('/private-data', @PrivateHandler)
-  .SetSecurityBearer;
-
-// Autenticación Básica (usuario/contraseña)
-Router.Get('/admin', @AdminHandler)
-  .SetSecurityBasic;
-
-// API Key en encabezado HTTP personalizado
-Router.Get('/service-api', @ServiceHandler)
-  .SetSecurityApiKey('X-Custom-API-Key');
-
-// Ruta explícitamente pública
-Router.Get('/public', @PublicHandler)
-  .SetSecurityNone;
-```
-
----
-
-### 6. Registro Canónico de Esquemas en `components.schemas` y Resolución `$ref`
-
-Swagger4Laz implementa un registro centralizado y seguro para hilos de esquemas de componentes según OpenAPI 3.1:
-
-#### A. Registro de Esquemas en el Router
-
-```pascal
-// 1. Registro idempotente (EnsureModel): no duplica ni lanza error si ya existe
-SwaggerRouter.EnsureModel('Producto', '{"type": "object", "properties": {"id": {"type": "integer"}, "nombre": {"type": "string"}}}');
-
-// 2. Registro estricto (RegisterModel): lanza excepción si existe, salvo que AOverwrite sea True
-SwaggerRouter.RegisterModel('Categoria', '{"type": "object", "properties": {"descripcion": {"type": "string"}}}', True);
-
-// 3. Verificación de existencia
-if not SwaggerRouter.HasModel('Producto') then
-  SwaggerRouter.EnsureModel('Producto', ProductoSchemaJson);
-```
-
-#### B. Resolución de Punteros `$ref` en Peticiones y Respuestas
-
-Al documentar endpoints, puede hacer referencia a modelos registrados mediante prefijos intuitivos o punteros canónicos JSON:
-
-```pascal
-procedure RegisterProductRoutes;
-begin
-  // 1. Referencia directa al esquema:
-  // Genera: {"schema": {"$ref": "#/components/schemas/Producto"}}
-  SwaggerRouter
-    .Get('/productos/:id', @GetProduct)
-    .SetSummary('Obtener producto por ID')
-    .AddTags('Productos')
-    .AddPathParam('id', True, 'integer', '1', 'ID del producto')
-    .AddResponse(200, 'Producto localizado', 'ref:Producto'); // o '#/components/schemas/Producto'
-
-  // 2. Array de referencias:
-  // Genera: {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/Producto"}}}
-  SwaggerRouter
-    .Get('/produtos', @ListProducts)
-    .SetSummary('Listar todos los productos')
-    .AddTags('Productos')
-    .AddResponse(200, 'Lista de productos', 'array:Producto');
-
-  // 3. Envoltorio paginado de referencias:
-  // Genera: {"schema": {"type": "object", "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/Producto"}}, "page": ..., "total_records": ...}}}
-  SwaggerRouter
-    .Get('/produtos/paginados', @ListProductsPaginated)
-    .SetSummary('Listar productos con paginación')
-    .AddTags('Productos')
-    .AddResponse(200, 'Productos paginados', 'paginated:Producto');
+  Api.Delete('/:id', @HandleEliminarCliente)
+     .PathParam('id', 'integer', 'ID del cliente')
+     .ProducesEmpty(204, 'Cliente eliminado');
 end;
 ```
 
-#### C. Validación Estricta en Tiempo de Ejecución
-
-Si una ruta referencia un modelo no registrado en `components/schemas` (por ejemplo, `ref:Inexistente`), Swagger4Laz lanza de inmediato una excepción explícita al renderizar el documento:
-```
-Exception: Schema "Inexistente" no registrado en components/schemas.
-```
-Esto previene que se publiquen especificaciones OpenAPI defectuosas o con punteros rotos hacia clientes frontend o herramientas de integración.
-
 ---
 
-### 7. Integración Nativa con DeltaModel ORM
+## Parámetros de Solicitud
 
-Bibliotecas como **DeltaModel** se integran directamente con Swagger4Laz generando esquemas canónicos y envoltorios sin código repetitivo:
+Declare parámetros con tipos estrictos y ámbitos definidos (`Path`, `Query`, `Header`, `Enum`):
 
 ```pascal
-SwaggerRouter
-  .Post('/productos', @CreateProduct)
-  .AddTags('Productos')
-  // Cuerpo de la petición con esquema de objeto
-  .SetBodyContent(TProductModel.SwaggerSchemaObject(), True)
-  // Respuesta con envoltorio paginado
-  .AddResponse(200, 'Lista paginada', TProductModel.SwaggerSchemaPaginated())
-  // Respuesta que referencia components.schemas
-  .AddResponse(201, 'Producto creado', TProductModel.SwaggerSchemaRefObject);
+SwaggerRouter.Get('/api/v1/busqueda/:categoria', @HandleBusqueda)
+  // Parámetro de ruta (obligatorio)
+  .PathParam('categoria', 'string', 'Filtro por categoría')
+
+  // Parámetro de consulta con valor predeterminado
+  .QueryParam('q', 'string', '', 'Texto de búsqueda')
+  .QueryParam('page', 'integer', '1', 'Número de página')
+  .QueryParam('page_size', 'integer', '20', 'Cantidad por página')
+
+  // Encabezado HTTP
+  .HeaderParam('X-Trace-Id', 'string', False, 'Identificador de rastreo')
+
+  // Parámetro con valores fijos permitidos (Enum)
+  .EnumParam('status', ['ACTIVO', 'INACTIVO', 'PENDIENTE'], 'Filtro por estado');
 ```
 
 ---
 
-## 🛠️ Referencia de la API
+## Cuerpo de la Solicitud (Payload)
 
-### `TSwaggerRouter`
+```pascal
+// Payload JSON referenciando components.schemas/ProductoInput
+Route.ConsumesJson('ProductoInput', True, 'Datos del producto');
 
-| Método | Descripción |
-| :--- | :--- |
-| `Get(APattern, ACallBack)` | Registra ruta para el verbo HTTP GET (retorna `THTTPDocRoute`) |
-| `Post(APattern, ACallBack)` | Registra ruta para el verbo HTTP POST (retorna `THTTPDocRoute`) |
-| `Put(APattern, ACallBack)` | Registra ruta para el verbo HTTP PUT (retorna `THTTPDocRoute`) |
-| `Delete(APattern, ACallBack)` | Registra ruta para el verbo HTTP DELETE (retorna `THTTPDocRoute`) |
-| `Patch(APattern, ACallBack)` | Registra ruta para el verbo HTTP PATCH (retorna `THTTPDocRoute`) |
-| `SetDocRoute(Endpoint)` | Define la URI de Swagger UI (por defecto: `/docs`) |
-| `SetTitle(ATitle)` | Define el título de la API |
-| `SetVersion(AVersion)` | Define la versión de la API |
-| `SetDescription(Text)` | Define la descripción general de la API |
-| `AddServer(Url, Description)` | Agrega una URL de servidor en la especificación OpenAPI |
-| `SetBasePath(APath)` | Configura el prefijo de ruta base para proxies |
-| `AddCustomHeader(Header, Value)` | Agrega encabezado global a las respuestas |
-| `EnsureModel(Name, Schema)` | Registra un esquema en `components/schemas` de forma idempotente |
-| `RegisterModel(Name, Schema, Overwrite)` | Registra un esquema con control de sobrescritura |
-| `HasModel(Name)` | Comprueba si el esquema ya existe |
-| `RegisterEnumModel(Name, Values)` | Registra una enumeración en `components/schemas` |
-| `BuildOpenAPISpecification(BasePath)` | Genera la especificación OpenAPI 3.1 completa en JSON |
-| `ClearCache` | Invalida la memoria caché del documento OpenAPI |
+// Datos en formulario estándar (application/x-www-form-urlencoded)
+Route.ConsumesFormData('Formulario de inicio de sesión');
 
-### `THTTPDocRoute`
-
-| Método | Descripción |
-| :--- | :--- |
-| `SetSummary(Text)` / `Summary(Text)` | Define el resumen corto del endpoint |
-| `SetDescription(Text)` / `Description(Text)` | Define la descripción detallada |
-| `AddTags(Name)` / `Tag(Name)` / `Tags(Array)` | Agrega etiqueta para agrupación visual en Swagger UI |
-| `SetSecurityBearer` / `SecurityBearer` | Configura seguridad Bearer JWT |
-| `SetSecurityBasic` / `SecurityBasic` | Configura seguridad Basic Auth |
-| `SetSecurityApiKey(Name)` / `SecurityApiKey(Name)` | Configura seguridad por API Key en encabezado |
-| `SetSecurityNone` / `SecurityNone` | Marca la ruta como explícitamente pública |
-| `AddPathParam(...)` / `PathParam(...)` | Documenta parámetro en la URL (`:param`) |
-| `AddQueryParam(...)` / `QueryParam(...)` | Documenta parámetro de consulta (`?param=...`) |
-| `AddHeaderParam(...)` / `HeaderParam(...)` | Documenta parámetro en encabezado HTTP |
-| `AddEnumParam(...)` | Documenta parámetro con valores predefinidos |
-| `SetBodyContent(...)` / `Body(...)` | Define esquema del cuerpo de la petición |
-| `SetBodyContentRef(ModelName, ...)` | Define cuerpo apuntando directamente a `$ref` |
-| `AddResponse(...)` / `Response(...)` | Documenta código HTTP y esquema de respuesta |
-| `AddResponseRef(Code, ModelName, ...)` | Documenta respuesta apuntando a `$ref` |
-| `AddResponseRefArray(Code, ModelName, ...)` | Documenta respuesta como array de `$ref` |
-| `AddResponseRefPaginated(Code, ModelName, ...)` | Documenta respuesta con envoltorio paginado de `$ref` |
-| `SetDeprecated(Value)` | Marca el endpoint como obsoleto en Swagger UI |
-
----
-
-## 🧪 Suite de Pruebas Automatizadas
-
-Swagger4Laz incluye una suite de pruebas unitarias en `demo/test_swagger.lpr` que valida el 100% de las funciones:
-
-- **Idempotencia**: `EnsureModel` no duplica registros ni lanza excepciones al registrar el mismo modelo varias veces.
-- **Búsqueda de Modelos**: `HasModel` refleja con precisión el estado del registro.
-- **Resolución de `$ref`**:
-  - `ref:NombreModelo` y `#/components/schemas/NombreModelo` generan `{"$ref": "#/components/schemas/NombreModelo"}`.
-  - `array:NombreModelo` genera `{"type": "array", "items": {"$ref": "#/components/schemas/NombreModelo"}}`.
-  - `paginated:NombreModelo` genera envoltorios canónicos paginados con metadatos.
-- **Control Estricto de Contratos**: Comprueba que referencias a modelos inexistentes lancen excepciones inmediatas y descriptivas.
-
-### Ejecución de pruebas:
-
-```bash
-cd demo
-fpc -B -FE. -FUlib -Fu.. test_swagger.lpr
-./test_swagger
+// Carga multipart para subida de ficheros (multipart/form-data)
+Route.ConsumesMultipart('Subida de archivos adjuntos');
 ```
 
 ---
 
-## 📄 Licencia
+## Definición de Respuestas
 
-Distribuido bajo la Licencia MIT. Consulte `LICENSE` para más detalles.
+Métodos directos para respuestas canónicas de OpenAPI:
+
+```pascal
+// Referencia a objeto único ($ref: #/components/schemas/Producto)
+Route.Produces(200, 'Producto', 'Operación ejecutada con éxito');
+
+// Lista simple: { type: "array", items: { $ref: #/components/schemas/Producto } }
+Route.ProducesArray(200, 'Producto', 'Lista de productos');
+
+// Envoltorio paginado: { type: "object", properties: { items: [...], total_records: ... } }
+Route.ProducesPaginated(200, 'Producto', 'Respuesta paginada');
+
+// Respuesta sin contenido (HTTP 204)
+Route.ProducesEmpty(204, 'Registro eliminado');
+```
+
+---
+
+## Errores en el Estándar RFC 7807
+
+El esquema `ProblemDetails` se registra de forma automática en `components.schemas`:
+
+```pascal
+// Respuesta de error individual con Content-Type: application/problem+json
+Route.ProducesProblem(400); // Bad Request
+Route.ProducesProblem(404); // Not Found
+
+// Declaración de múltiples códigos de error
+Route.ProducesProblem([400, 403, 404, 409]);
+
+// Declaración del conjunto estándar de errores (400, 401, 403, 404, 409, 422, 500)
+Route.ProducesStandardProblems;
+```
+
+---
+
+## Esquemas de Autenticación
+
+Configure la autenticación a nivel de ruta, grupo o enrutador global:
+
+```pascal
+// Bearer JWT (Authorization: Bearer <token>)
+Route.SecurityBearer;
+
+// HTTP Basic (Authorization: Basic <credenciales>)
+Route.SecurityBasic;
+
+// Clave en encabezado HTTP (predeterminado: X-API-Key)
+Route.SecurityApiKey('X-Tenant-Key');
+
+// Ruta pública dentro de un grupo protegido
+Route.SecurityNone;
+```
+
+---
+
+## Registro de Modelos
+
+Los esquemas pueden incorporarse a `components.schemas` mediante programación:
+
+```pascal
+// Registrar esquema JSON explícito
+SwaggerRouter.RegisterModel(
+  'Pedido',
+  '{"type":"object","properties":{"id":{"type":"integer"},"total":{"type":"number"}}}'
+);
+
+// Registro idempotente (no duplica si ya existe)
+SwaggerRouter.EnsureModel('Pedido', JsonSchemaString);
+
+// Registro de enumeración (Enum)
+SwaggerRouter.RegisterEnumModel('EstadoPedido', ['BORRADOR', 'CONFIRMADO', 'ENVIADO', 'CANCELADO']);
+```
+
+---
+
+## Publicación de Endpoints
+
+```pascal
+// Registra automáticamente Swagger UI en /docs y la especificación en /docs/openapi.json
+SwaggerRouter.SetDocRoute('/docs');
+
+// O vinculación manual de las rutinas:
+HTTPRouter.RegisterRoute('/api/openapi.json', rmGet, @Documentation);
+HTTPRouter.RegisterRoute('/api/docs', rmGet, @SwaggerUI);
+```
+
+---
+
+## Licencia
+
+Distribuido bajo la licencia MIT. Consulte el archivo [LICENSE](LICENSE) para más detalles.
