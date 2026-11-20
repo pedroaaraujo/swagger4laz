@@ -239,10 +239,340 @@ var
   SwaggerRouter: TSwaggerRouter;
   HTTPRouter: THTTPRouter;
 
-procedure Documentacao(AReq: TRequest; AResp: TResponse);
+type
+  { Supported locales for Swagger4Laz messages }
+  TSwaggerLocale = (slEnUS, slPtBR, slEsES);
+
+procedure SetSwaggerLocale(ALocale: TSwaggerLocale);
+function GetSwaggerLocale: TSwaggerLocale;
+procedure SetSwaggerLocaleByName(const AName: string);
+function GetSwaggerLocaleName: string;
+
+procedure Documentation(AReq: TRequest; AResp: TResponse);
+procedure Documentacao(AReq: TRequest; AResp: TResponse); // Backward compatibility alias
 procedure SwaggerUI(AReq: TRequest; AResp: TResponse);
 
 implementation
+
+var
+  GSwaggerLocale: TSwaggerLocale = slEnUS;
+
+const
+  STR_SWAGGER_LOCALE_NAMES: array[TSwaggerLocale] of string = ('en-US', 'pt-BR', 'es-ES');
+
+  STR_SWAGGER_INVALID_PREFIX: array[TSwaggerLocale] of string = (
+    'Invalid route prefix: %s',
+    'Prefixo de rota inválido: %s',
+    'Prefijo de ruta no válido: %s'
+  );
+  STR_SWAGGER_SCHEMA_MUST_BE_JSON: array[TSwaggerLocale] of string = (
+    'OpenAPI schema must be a JSON object.',
+    'OpenAPI schema precisa ser um objeto JSON.',
+    'El esquema OpenAPI debe ser un objeto JSON.'
+  );
+  STR_SWAGGER_SCHEMA_NOT_REGISTERED: array[TSwaggerLocale] of string = (
+    'Schema "%s" not registered in components/schemas.',
+    'Schema "%s" não registrado em components/schemas.',
+    'Esquema "%s" no registrado en components/schemas.'
+  );
+  STR_SWAGGER_INVALID_DEFAULT_NUMERIC: array[TSwaggerLocale] of string = (
+    'Invalid numeric default value for %s.',
+    'Valor padrão numérico inválido para %s.',
+    'Valor predeterminado numérico no válido para %s.'
+  );
+  STR_SWAGGER_INVALID_DEFAULT_INTEGER: array[TSwaggerLocale] of string = (
+    'Invalid integer default value for %s.',
+    'Valor padrão inteiro inválido para %s.',
+    'Valor predeterminado entero no válido para %s.'
+  );
+  STR_SWAGGER_INVALID_DEFAULT_BOOLEAN: array[TSwaggerLocale] of string = (
+    'Invalid boolean default value for %s.',
+    'Valor padrão booleano inválido para %s.',
+    'Valor predeterminado booleano no válido para %s.'
+  );
+  STR_SWAGGER_INVALID_OPENAPI_TYPE: array[TSwaggerLocale] of string = (
+    'Invalid OpenAPI type for %s.',
+    'Tipo OpenAPI inválido para %s.',
+    'Tipo de OpenAPI no válido para %s.'
+  );
+  STR_SWAGGER_ROUTE_PARAM_NOT_EXIST: array[TSwaggerLocale] of string = (
+    'Route parameter "%s" does not exist in %s.',
+    'Parâmetro de rota "%s" não existe em %s.',
+    'El parámetro de ruta "%s" no existe en %s.'
+  );
+  STR_SWAGGER_DUPLICATE_OPERATION_ID: array[TSwaggerLocale] of string = (
+    'Duplicate operationId: %s',
+    'operationId duplicado: %s',
+    'operationId duplicado: %s'
+  );
+  STR_SWAGGER_METHOD_NOT_DOCUMENTABLE: array[TSwaggerLocale] of string = (
+    'HTTP method not documentable in %s.',
+    'Método HTTP não documentável em %s.',
+    'Método HTTP no documentable en %s.'
+  );
+  STR_SWAGGER_DUPLICATE_ROUTE: array[TSwaggerLocale] of string = (
+    'Duplicate route for %s %s.',
+    'Rota duplicada para %s %s.',
+    'Ruta duplicada para %s %s.'
+  );
+  STR_SWAGGER_INVALID_RESPONSE_CODE: array[TSwaggerLocale] of string = (
+    'Invalid OpenAPI response code: %s',
+    'Código de resposta OpenAPI inválido: %s',
+    'Código de respuesta OpenAPI no válido: %s'
+  );
+  STR_SWAGGER_CONTENT_TYPE_EMPTY: array[TSwaggerLocale] of string = (
+    'Response Content-Type cannot be empty.',
+    'Content-Type da resposta não pode ficar vazio.',
+    'El Content-Type de respuesta no puede estar vacío.'
+  );
+  STR_SWAGGER_DUPLICATE_RESPONSE: array[TSwaggerLocale] of string = (
+    'Response %s has already been documented on this route.',
+    'Resposta %s já foi documentada nesta rota.',
+    'La respuesta %s ya ha sido documentada en esta ruta.'
+  );
+  STR_SWAGGER_PARAM_NAME_EMPTY: array[TSwaggerLocale] of string = (
+    'Parameter name cannot be empty.',
+    'Nome do parâmetro não pode ficar vazio.',
+    'El nombre del parámetro no puede estar vacío.'
+  );
+  STR_SWAGGER_INVALID_PARAM_TYPE: array[TSwaggerLocale] of string = (
+    'Invalid OpenAPI parameter type: %s',
+    'Tipo de parâmetro OpenAPI inválido: %s',
+    'Tipo de parámetro OpenAPI no válido: %s'
+  );
+  STR_SWAGGER_PATH_PARAM_MUST_BE_REQUIRED: array[TSwaggerLocale] of string = (
+    'Path parameters must be required.',
+    'Parâmetros de rota precisam ser obrigatórios.',
+    'Los parámetros de ruta deben ser obligatorios.'
+  );
+  STR_SWAGGER_DUPLICATE_PARAM: array[TSwaggerLocale] of string = (
+    'Parameter %s has already been documented on this route.',
+    'Parâmetro %s já foi documentado nesta rota.',
+    'El parámetro %s ya ha sido documentado en esta ruta.'
+  );
+  STR_SWAGGER_ENUM_MUST_HAVE_VALUES: array[TSwaggerLocale] of string = (
+    'Enum must have at least one value.',
+    'Enum precisa ter pelo menos um valor.',
+    'El enum debe tener al menos un valor.'
+  );
+  STR_SWAGGER_DEFAULT_MUST_BE_IN_ENUM: array[TSwaggerLocale] of string = (
+    'Default value must be one of the enum values.',
+    'Valor padrão precisa estar entre os valores do enum.',
+    'El valor predeterminado debe ser uno de los valores del enum.'
+  );
+  STR_SWAGGER_API_KEY_HEADER_EMPTY: array[TSwaggerLocale] of string = (
+    'API Key header name cannot be empty.',
+    'Nome do header de API Key não pode ficar vazio.',
+    'El nombre del encabezado de la clave de API no puede estar vacío.'
+  );
+  STR_SWAGGER_SINGLE_API_KEY_HEADER: array[TSwaggerLocale] of string = (
+    'Swagger4Laz supports a single header name for API Key.',
+    'Swagger4Laz suporta um único nome de header para API Key.',
+    'Swagger4Laz admite un único nombre de encabezado para la clave de API.'
+  );
+  STR_SWAGGER_SCHEMA_NAME_EMPTY: array[TSwaggerLocale] of string = (
+    'Schema name cannot be empty.',
+    'Nome do schema não pode ficar vazio.',
+    'El nombre del esquema no puede estar vacío.'
+  );
+  STR_SWAGGER_SCHEMA_CANNOT_BE_NIL: array[TSwaggerLocale] of string = (
+    'Schema "%s" cannot be nil.',
+    'Schema "%s" não pode ser nil.',
+    'El esquema "%s" no puede ser nulo.'
+  );
+  STR_SWAGGER_SCHEMA_MUST_BE_OBJECT: array[TSwaggerLocale] of string = (
+    'Schema "%s" must be a JSON object.',
+    'Schema "%s" precisa ser um objeto JSON.',
+    'El esquema "%s" debe ser un objeto JSON.'
+  );
+  STR_SWAGGER_SCHEMA_ALREADY_REGISTERED: array[TSwaggerLocale] of string = (
+    'Schema "%s" is already registered.',
+    'Schema "%s" já foi registrado.',
+    'El esquema "%s" ya ha sido registrado.'
+  );
+  STR_SWAGGER_INVALID_PASCAL_ENUM: array[TSwaggerLocale] of string = (
+    'Type "%s" is not a valid Pascal Enum.',
+    'O tipo "%s" não é um Enum Pascal válido.',
+    'El tipo "%s" no es un Enum de Pascal válido.'
+  );
+  STR_SWAGGER_ROUTE_ALREADY_REGISTERED: array[TSwaggerLocale] of string = (
+    'The Swagger route has already been registered and cannot be modified.',
+    'A rota do Swagger já foi registrada e não pode ser alterada.',
+    'La ruta de Swagger ya ha sido registrada y no se puede modificar.'
+  );
+
+procedure SetSwaggerLocale(ALocale: TSwaggerLocale);
+begin
+  GSwaggerLocale := ALocale;
+end;
+
+function GetSwaggerLocale: TSwaggerLocale;
+begin
+  Result := GSwaggerLocale;
+end;
+
+procedure SetSwaggerLocaleByName(const AName: string);
+var
+  S: string;
+begin
+  S := LowerCase(Trim(AName));
+  if (S = 'pt') or (S = 'pt-br') or (S = 'pt_br') or (S = 'portuguese') then
+    GSwaggerLocale := slPtBR
+  else if (S = 'es') or (S = 'es-es') or (S = 'es_es') or (S = 'spanish') then
+    GSwaggerLocale := slEsES
+  else
+    GSwaggerLocale := slEnUS;
+end;
+
+function GetSwaggerLocaleName: string;
+begin
+  Result := STR_SWAGGER_LOCALE_NAMES[GSwaggerLocale];
+end;
+
+function MsgInvalidRoutePrefix(const APath: string): string;
+begin
+  Result := Format(STR_SWAGGER_INVALID_PREFIX[GSwaggerLocale], [APath]);
+end;
+
+function MsgOpenApiSchemaMustBeJsonObject: string;
+begin
+  Result := STR_SWAGGER_SCHEMA_MUST_BE_JSON[GSwaggerLocale];
+end;
+
+function MsgSchemaNotRegistered(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_SCHEMA_NOT_REGISTERED[GSwaggerLocale], [AName]);
+end;
+
+function MsgInvalidDefaultNumeric(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_INVALID_DEFAULT_NUMERIC[GSwaggerLocale], [AName]);
+end;
+
+function MsgInvalidDefaultInteger(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_INVALID_DEFAULT_INTEGER[GSwaggerLocale], [AName]);
+end;
+
+function MsgInvalidDefaultBoolean(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_INVALID_DEFAULT_BOOLEAN[GSwaggerLocale], [AName]);
+end;
+
+function MsgInvalidOpenApiType(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_INVALID_OPENAPI_TYPE[GSwaggerLocale], [AName]);
+end;
+
+function MsgRouteParamNotFound(const AParam, ARoute: string): string;
+begin
+  Result := Format(STR_SWAGGER_ROUTE_PARAM_NOT_EXIST[GSwaggerLocale], [AParam, ARoute]);
+end;
+
+function MsgDuplicateOperationId(const AId: string): string;
+begin
+  Result := Format(STR_SWAGGER_DUPLICATE_OPERATION_ID[GSwaggerLocale], [AId]);
+end;
+
+function MsgMethodNotDocumentable(const AMethod: string): string;
+begin
+  Result := Format(STR_SWAGGER_METHOD_NOT_DOCUMENTABLE[GSwaggerLocale], [AMethod]);
+end;
+
+function MsgDuplicateRoute(const AMethod, APattern: string): string;
+begin
+  Result := Format(STR_SWAGGER_DUPLICATE_ROUTE[GSwaggerLocale], [AMethod, APattern]);
+end;
+
+function MsgInvalidResponseCode(const ACode: string): string;
+begin
+  Result := Format(STR_SWAGGER_INVALID_RESPONSE_CODE[GSwaggerLocale], [ACode]);
+end;
+
+function MsgResponseContentTypeEmpty: string;
+begin
+  Result := STR_SWAGGER_CONTENT_TYPE_EMPTY[GSwaggerLocale];
+end;
+
+function MsgDuplicateResponse(const ACode: string): string;
+begin
+  Result := Format(STR_SWAGGER_DUPLICATE_RESPONSE[GSwaggerLocale], [ACode]);
+end;
+
+function MsgParamNameEmpty: string;
+begin
+  Result := STR_SWAGGER_PARAM_NAME_EMPTY[GSwaggerLocale];
+end;
+
+function MsgInvalidParamType(const AType: string): string;
+begin
+  Result := Format(STR_SWAGGER_INVALID_PARAM_TYPE[GSwaggerLocale], [AType]);
+end;
+
+function MsgPathParamMustBeRequired: string;
+begin
+  Result := STR_SWAGGER_PATH_PARAM_MUST_BE_REQUIRED[GSwaggerLocale];
+end;
+
+function MsgDuplicateParam(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_DUPLICATE_PARAM[GSwaggerLocale], [AName]);
+end;
+
+function MsgEnumMustHaveValues: string;
+begin
+  Result := STR_SWAGGER_ENUM_MUST_HAVE_VALUES[GSwaggerLocale];
+end;
+
+function MsgDefaultMustBeInEnum: string;
+begin
+  Result := STR_SWAGGER_DEFAULT_MUST_BE_IN_ENUM[GSwaggerLocale];
+end;
+
+function MsgApiKeyHeaderNameEmpty: string;
+begin
+  Result := STR_SWAGGER_API_KEY_HEADER_EMPTY[GSwaggerLocale];
+end;
+
+function MsgSingleApiKeyHeaderSupported: string;
+begin
+  Result := STR_SWAGGER_SINGLE_API_KEY_HEADER[GSwaggerLocale];
+end;
+
+function MsgSchemaNameEmpty: string;
+begin
+  Result := STR_SWAGGER_SCHEMA_NAME_EMPTY[GSwaggerLocale];
+end;
+
+function MsgSchemaCannotBeNil(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_SCHEMA_CANNOT_BE_NIL[GSwaggerLocale], [AName]);
+end;
+
+function MsgSchemaMustBeJsonObject(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_SCHEMA_MUST_BE_OBJECT[GSwaggerLocale], [AName]);
+end;
+
+function MsgSchemaAlreadyRegistered(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_SCHEMA_ALREADY_REGISTERED[GSwaggerLocale], [AName]);
+end;
+
+function MsgInvalidPascalEnum(const AName: string): string;
+begin
+  Result := Format(STR_SWAGGER_INVALID_PASCAL_ENUM[GSwaggerLocale], [AName]);
+end;
+
+function MsgSwaggerRouteAlreadyRegistered: string;
+begin
+  Result := STR_SWAGGER_ROUTE_ALREADY_REGISTERED[GSwaggerLocale];
+end;
+
+procedure Documentation(AReq: TRequest; AResp: TResponse);
+begin
+  Documentacao(AReq, AResp);
+end;
 
 function IsSafePathPrefix(const APath: string): Boolean;
 var
@@ -266,7 +596,7 @@ begin
   if not Result.StartsWith('/') then
     Result := '/' + Result;
   if not IsSafePathPrefix(Result) then
-    raise Exception.CreateFmt('Prefixo de rota inválido: %s', [APath]);
+    raise Exception.Create(MsgInvalidRoutePrefix(APath));
   while (Length(Result) > 1) and Result.EndsWith('/') do
     Delete(Result, Length(Result), 1);
 end;
@@ -332,7 +662,7 @@ begin
     if Result.JSONType <> jtObject then
     begin
       Result.Free;
-      raise Exception.Create('OpenAPI schema precisa ser um objeto JSON.');
+      raise Exception.Create(MsgOpenApiSchemaMustBeJsonObject);
     end;
     Exit;
   end;
@@ -374,7 +704,7 @@ begin
 
   // Validação no SwaggerRouter se o router estiver instanciado
   if Assigned(SwaggerRouter) and (SwaggerRouter.Components.Models.Find(CleanModelName) = nil) then
-    raise Exception.CreateFmt('Schema "%s" não registrado em components/schemas.', [CleanModelName]);
+    raise Exception.Create(MsgSchemaNotRegistered(CleanModelName));
 
   RefName := CleanModelName;
   RefName := StringReplace(RefName, '~', '~0', [rfReplaceAll]);
@@ -451,14 +781,14 @@ begin
         begin
           Result.Free;
           Result := nil;
-          raise Exception.CreateFmt('Valor padrão numérico inválido para %s.', [AName]);
+          raise Exception.Create(MsgInvalidDefaultNumeric(AName));
         end;
         if (TypeIndex = 1) and
            ((Pos('.', Parsed) > 0) or (Pos('e', LowerCase(Parsed)) > 0)) then
         begin
           Result.Free;
           Result := nil;
-          raise Exception.CreateFmt('Valor padrão inteiro inválido para %s.', [AName]);
+          raise Exception.Create(MsgInvalidDefaultInteger(AName));
         end;
       end;
     3:
@@ -467,9 +797,9 @@ begin
       else if SameText(AValue, 'false') then
         Result := TJSONBoolean.Create(False)
       else
-        raise Exception.CreateFmt('Valor padrão booleano inválido para %s.', [AName]);
+        raise Exception.Create(MsgInvalidDefaultBoolean(AName));
   else
-    raise Exception.CreateFmt('Tipo OpenAPI inválido para %s.', [AName]);
+    raise Exception.Create(MsgInvalidOpenApiType(AName));
   end;
 end;
 
@@ -588,8 +918,7 @@ begin
           for J := 0 to Route.Params.Count - 1 do
             if (Route.Params[J].ParamIn = piPath) and
                (PathParams.IndexOf(Route.Params[J].Name) < 0) then
-              raise Exception.CreateFmt('Parâmetro de rota "%s" não existe em %s.',
-                [Route.Params[J].Name, Route.URLPattern]);
+              raise Exception.Create(MsgRouteParamNotFound(Route.Params[J].Name, Route.URLPattern));
 
           Pattern := RegEx.Replace(Route.URLPattern, '{$1}', True);
 
@@ -622,7 +951,7 @@ begin
             if not OperationId.IsEmpty then
             begin
               if OperationIds.IndexOf(OperationId) >= 0 then
-                raise Exception.CreateFmt('operationId duplicado: %s', [OperationId]);
+                raise Exception.Create(MsgDuplicateOperationId(OperationId));
               OperationIds.Add(OperationId);
               JsonMethod.Add('operationId', OperationId);
             end;
@@ -676,8 +1005,7 @@ begin
             rmHead: MethodStr := 'head';
             rmTrace: MethodStr := 'trace';
           else
-            raise Exception.CreateFmt('Método HTTP não documentável em %s.',
-              [Route.URLPattern]);
+            raise Exception.Create(MsgMethodNotDocumentable(Route.URLPattern));
           end;
 
           if JsonURI.Find(MethodStr) = nil then
@@ -685,7 +1013,7 @@ begin
           else
           begin
             JsonMethod.Free;
-            raise Exception.CreateFmt('Rota duplicada para %s %s.', [MethodStr, Pattern]);
+            raise Exception.Create(MsgDuplicateRoute(MethodStr, Pattern));
           end;
         end;
       finally
@@ -943,12 +1271,12 @@ begin
     Code := 'default'
   else if (StrToIntDef(Code, 0) < 100) or (StrToIntDef(Code, 0) > 599) or
           (IntToStr(StrToIntDef(Code, 0)) <> Code) then
-    raise Exception.CreateFmt('Código de resposta OpenAPI inválido: %s', [Code]);
+    raise Exception.Create(MsgInvalidResponseCode(Code));
   if ContentType.Trim.IsEmpty then
-    raise Exception.Create('Content-Type da resposta não pode ficar vazio.');
+    raise Exception.Create(MsgResponseContentTypeEmpty);
   for I := 0 to Responses.Count - 1 do
     if SameText(Responses[I].Code, Code) then
-      raise Exception.CreateFmt('Resposta %s já foi documentada nesta rota.', [Code]);
+      raise Exception.Create(MsgDuplicateResponse(Code));
   Response := TDocResponse.Create;
   Response.Code := Code;
   Response.Description := ADescription;
@@ -1040,14 +1368,14 @@ var
   I: Integer;
 begin
   if AName.Trim.IsEmpty then
-    raise Exception.Create('Nome do parâmetro não pode ficar vazio.');
+    raise Exception.Create(MsgParamNameEmpty);
   if IndexText(ParamType, ['string', 'integer', 'number', 'boolean']) < 0 then
-    raise Exception.CreateFmt('Tipo de parâmetro OpenAPI inválido: %s', [ParamType]);
+    raise Exception.Create(MsgInvalidParamType(ParamType));
   if (ParamIn = piPath) and not Required then
-    raise Exception.Create('Parâmetros de rota precisam ser obrigatórios.');
+    raise Exception.Create(MsgPathParamMustBeRequired);
   for I := 0 to FParams.Count - 1 do
     if (FParams[I].ParamIn = ParamIn) and SameText(FParams[I].Name, AName) then
-      raise Exception.CreateFmt('Parâmetro %s já foi documentado nesta rota.', [AName]);
+      raise Exception.Create(MsgDuplicateParam(AName));
   DefaultData := ParameterDefaultJson(LowerCase(ParamType), AName, ParamDefault);
   DefaultData.Free;
   if ATitle.IsEmpty then
@@ -1074,16 +1402,16 @@ var
   I: Integer;
 begin
   if AName.Trim.IsEmpty then
-    raise Exception.Create('Nome do parâmetro não pode ficar vazio.');
+    raise Exception.Create(MsgParamNameEmpty);
   if (ParamIn = piPath) and not Required then
-    raise Exception.Create('Parâmetros de rota precisam ser obrigatórios.');
+    raise Exception.Create(MsgPathParamMustBeRequired);
   if Length(AValues) = 0 then
-    raise Exception.Create('Enum precisa ter pelo menos um valor.');
+    raise Exception.Create(MsgEnumMustHaveValues);
   if (DefaultValue <> '') and (IndexStr(DefaultValue, AValues) < 0) then
-    raise Exception.Create('Valor padrão precisa estar entre os valores do enum.');
+    raise Exception.Create(MsgDefaultMustBeInEnum);
   for I := 0 to FParams.Count - 1 do
     if (FParams[I].ParamIn = ParamIn) and SameText(FParams[I].Name, AName) then
-      raise Exception.CreateFmt('Parâmetro %s já foi documentado nesta rota.', [AName]);
+      raise Exception.Create(MsgDuplicateParam(AName));
   Param := TDocReqParam.Create;
   Param.Name := AName;
   Param.Title := AName;
@@ -1239,10 +1567,10 @@ end;
 function THTTPDocRoute.SetSecurityApiKey(HeaderName: string): THTTPDocRoute;
 begin
   if HeaderName.Trim.IsEmpty then
-    raise Exception.Create('Nome do header de API Key não pode ficar vazio.');
+    raise Exception.Create(MsgApiKeyHeaderNameEmpty);
   if (ssApiKey in SwaggerRouter.Components.SecuritySchemes) and
      not SameText(SwaggerRouter.Components.ApiKeyHeaderName, HeaderName) then
-    raise Exception.Create('Swagger4Laz suporta um único nome de header para API Key.');
+    raise Exception.Create(MsgSingleApiKeyHeaderSupported);
   SwaggerRouter.Components.ApiKeyHeaderName := HeaderName;
   Result := SetSecurity(ssApiKey);
 end;
@@ -1428,14 +1756,14 @@ begin
   if AName.Trim.IsEmpty then
   begin
     if Assigned(AModel) then AModel.Free;
-    raise Exception.Create('Nome do schema não pode ficar vazio.');
+    raise Exception.Create(MsgSchemaNameEmpty);
   end;
   if AModel = nil then
-    raise Exception.CreateFmt('Schema "%s" não pode ser nil.', [AName]);
+    raise Exception.Create(MsgSchemaCannotBeNil(AName));
   if AModel.JSONType <> jtObject then
   begin
     AModel.Free;
-    raise Exception.CreateFmt('Schema "%s" precisa ser um objeto JSON.', [AName]);
+    raise Exception.Create(MsgSchemaMustBeJsonObject(AName));
   end;
 
   FCacheLock.Acquire;
@@ -1479,11 +1807,11 @@ var
   ExistingIdx: Integer;
 begin
   if AName.Trim.IsEmpty then
-    raise Exception.Create('Nome do schema não pode ficar vazio.');
+    raise Exception.Create(MsgSchemaNameEmpty);
   if AModel = nil then
-    raise Exception.CreateFmt('Schema "%s" não pode ser nil.', [AName]);
+    raise Exception.Create(MsgSchemaCannotBeNil(AName));
   if AModel.JSONType <> jtObject then
-    raise Exception.CreateFmt('Schema "%s" precisa ser um objeto JSON.', [AName]);
+    raise Exception.Create(MsgSchemaMustBeJsonObject(AName));
   FCacheLock.Acquire;
   try
     ExistingIdx := FComponents.Models.IndexOfName(AName);
@@ -1497,7 +1825,7 @@ begin
         FDocCacheBasePath := '';
       end
       else
-        raise Exception.CreateFmt('Schema "%s" já foi registrado.', [AName]);
+        raise Exception.Create(MsgSchemaAlreadyRegistered(AName));
     end
     else
     begin
@@ -1542,7 +1870,7 @@ var
   SchemaObj: TJSONObject;
 begin
   if TypeInfoData^.Kind <> tkEnumeration then
-    raise Exception.CreateFmt('O tipo "%s" não é um Enum Pascal válido.', [TypeInfoData^.Name]);
+    raise Exception.Create(MsgInvalidPascalEnum(TypeInfoData^.Name));
 
   TypeData := GetTypeData(TypeInfoData);
   EnumArr := TJSONArray.Create;
@@ -1586,7 +1914,7 @@ begin
   begin
     if FDocRoute = CleanEndpoint then
       Exit(Self);
-    raise Exception.Create('A rota do Swagger já foi registrada e não pode ser alterada.');
+    raise Exception.Create(MsgSwaggerRouteAlreadyRegistered);
   end;
 
   ClearCache;
@@ -1684,6 +2012,10 @@ begin
 end;
 
 initialization
+  if GetEnvironmentVariable('SWAGGER_LOCALE') <> '' then
+    SetSwaggerLocaleByName(GetEnvironmentVariable('SWAGGER_LOCALE'))
+  else if GetEnvironmentVariable('ZENITH_LOCALE') <> '' then
+    SetSwaggerLocaleByName(GetEnvironmentVariable('ZENITH_LOCALE'));
   HTTPRouter := httproute.HTTPRouter;
   TSwaggerRouter.Initialize;
 

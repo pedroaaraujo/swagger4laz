@@ -32,6 +32,9 @@
   - Suporte a headers globais customizados na documentação e nas respostas.
 - ⚡ **Desduplicação e Normalização de Métodos HTTP**:
   - Agrupa múltiplos verbos HTTP na mesma URI e normaliza barras finais.
+- 🌐 **Internacionalização de Mensagens (i18n)**:
+  - Mensagens de erro e exceções configuráveis por idioma (`en-US`, `pt-BR`, `es-ES`) via `SetSwaggerLocale` ou variáveis de ambiente `SWAGGER_LOCALE` / `ZENITH_LOCALE`.
+  - Código-fonte, métodos e identificadores 100% em inglês (`Documentation`, com alias `Documentacao`).
 
 ---
 
