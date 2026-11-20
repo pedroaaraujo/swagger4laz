@@ -890,7 +890,7 @@ begin
   if CleanModelName.StartsWith('#/components/schemas/') then
     CleanModelName := Copy(CleanModelName, 22, MaxInt);
 
-  // Validação no SwaggerRouter se o router estiver instanciado
+  // Validate in SwaggerRouter if the router is instantiated
   if Assigned(SwaggerRouter) and (SwaggerRouter.Components.Models.Find(CleanModelName) = nil) then
     raise Exception.Create(MsgSchemaNotRegistered(CleanModelName));
 
@@ -2432,7 +2432,7 @@ const
 constructor TSwaggerRouter.Create;
 begin
   inherited Create;
-  FCacheLock := TCriticalSection.Create; // Inicializa o Lock
+  FCacheLock := TCriticalSection.Create; // Initialize lock
   FGroups := TFPObjectList.Create(True);
   FDefaultCustomHeaders := TStringList.Create;
   SetLength(FDefaultMediaTypes, 0);
@@ -2458,7 +2458,7 @@ begin
   FServers.Free;
   if FContactObj <> nil then FContactObj.Free;
   if FLicenseObj <> nil then FLicenseObj.Free;
-  FCacheLock.Free; // Libera o Lock
+  FCacheLock.Free; // Release lock
   inherited Destroy;
 end;
 
@@ -2947,7 +2947,7 @@ begin
     Existing := FComponents.Models.Find(AName);
     if Existing <> nil then
     begin
-      // Já registrado: libera AModel e não faz nada (idempotente)
+      // Already registered: free AModel and do nothing (idempotent)
       AModel.Free;
     end
     else

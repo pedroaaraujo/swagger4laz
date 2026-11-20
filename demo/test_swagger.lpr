@@ -51,23 +51,23 @@ begin
   WriteLn('          Swagger4Laz - Suíte de Testes Automatizados              ');
   WriteLn('===================================================================');
 
-  // 1. Configuração do Router
+  // 1. Router Configuration
   SwaggerRouter
     .SetTitle('Test API')
     .SetVersion('1.0.0')
     .SetDescription('API para testes de schemas e $ref');
 
-  // 2. Teste de HasModel e EnsureModel
+  // 2. HasModel and EnsureModel Test
   AssertTrue(not SwaggerRouter.HasModel('TodoItem'), 'HasModel retorna False para modelo não cadastrado');
 
   SwaggerRouter.EnsureModel('TodoItem', '{"type": "object", "properties": {"id": {"type": "integer"}, "title": {"type": "string"}}}');
   AssertTrue(SwaggerRouter.HasModel('TodoItem'), 'HasModel retorna True após EnsureModel');
 
-  // Idempotência de EnsureModel
+  // EnsureModel Idempotency
   SwaggerRouter.EnsureModel('TodoItem', '{"type": "object", "properties": {"id": {"type": "integer"}}}');
   AssertTrue(SwaggerRouter.HasModel('TodoItem'), 'EnsureModel é idempotente e não falha');
 
-  // 3. Registro de Rotas com métodos Ref e Múltiplos Media Types
+  // 3. Route Registration with Ref methods and Multiple Media Types
   SwaggerRouter
     .Get('/todos/:id', @DummyHandler)
     .SetSummary('Buscar Todo')
@@ -97,7 +97,7 @@ begin
     .Consumes('TodoItem', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR, MEDIA_TYPE_BSON], True, 'Dados de criação')
     .Produces(201, 'TodoItem', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Criado com sucesso');
 
-  // Teste de TSwaggerRouteGroup com Defaults Fluentes
+  // TSwaggerRouteGroup Test with Fluent Defaults
   SwaggerRouter
     .Group('/api/v2')
     .Tag('V2')
@@ -106,7 +106,7 @@ begin
     .Get('/items', @DummyHandler)
     .Produces(200, 'TodoItem', 'Items v2');
 
-  // 4. Verificação do OpenAPI JSON gerado
+  // 4. Verify generated OpenAPI JSON
   JsonDoc := SwaggerRouter.BuildOpenAPISpecification;
   AssertTrue(Length(JsonDoc) > 0, 'BuildOpenAPISpecification gerou JSON');
 
@@ -131,7 +131,7 @@ begin
     AssertTrue(Assigned(Paths), 'OpenAPI possui paths documentados');
     AssertTrue(Pos('#/components/schemas/TodoItem', JsonDoc) > 0, 'OpenAPI contém referências canônicas $ref');
 
-    // Validações de Múltiplos Media Types e Encodings
+    // Multiple Media Types and Encodings Validations
     AssertTrue(Pos('application/json', JsonDoc) > 0, 'OpenAPI contém application/json');
     AssertTrue(Pos('application/cbor', JsonDoc) > 0, 'OpenAPI contém application/cbor');
     AssertTrue(Pos('application/bson', JsonDoc) > 0, 'OpenAPI contém application/bson');

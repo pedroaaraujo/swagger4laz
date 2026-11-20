@@ -29,7 +29,7 @@ initialization
 SwaggerRouter
   .EnsureModel('Todo', '{"type": "object", "properties": {"id": {"type": "integer"}, "title": {"type": "string"}, "completed": {"type": "boolean"}}}');
 
-// Rota GET com múltiplos formatos de serialização e compressão GZIP
+// GET route with multiple serialization formats and GZIP compression
 SwaggerRouter
   .RegisterRoute('todo', rmGet, @GetTodos, False)
   .SetSummary('Get all TODOs in multiple formats')
@@ -38,7 +38,7 @@ SwaggerRouter
   .AcceptsGzip
   .ProducesGzip;
 
-// Rota GET por ID
+// GET route by ID
 SwaggerRouter
   .RegisterRoute('todo/:id', rmGet, @GetTodo, False)
   .SetSummary('Get todo by ID')
@@ -46,7 +46,7 @@ SwaggerRouter
   .AddPathParam('id', True, 'integer', '1', 'ID do Todo')
   .Produces(200, 'Todo', [MEDIA_TYPE_JSON, MEDIA_TYPE_CBOR], 'Todo localizado');
 
-// Rota POST com payload em múltiplos formatos
+// POST route with multi-format payload
 SwaggerRouter
   .RegisterRoute('todo', rmPost, @CreateTodo, False)
   .SetSummary('Create a new TODO item')
