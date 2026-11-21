@@ -991,6 +991,645 @@ begin
   end;
 end;
 
+function CanonicalSchemaJson(AData: TJSONData): string;
+var
+  Obj: TJSONObject;
+  Arr: TJSONArray;
+  Keys: TStringList;
+  I: Integer;
+  SB: TStringBuilder;
+begin
+  if AData = nil then
+    Exit('null');
+
+  if AData is TJSONObject then
+  begin
+    Obj := TJSONObject(AData);
+    if Obj.Count = 0 then
+      Exit('{}');
+    Keys := TStringList.Create;
+    SB := TStringBuilder.Create;
+    try
+      Keys.CaseSensitive := True;
+      for I := 0 to Obj.Count - 1 do
+        Keys.Add(Obj.Names[I]);
+      Keys.Sort;
+      SB.Append('{');
+      for I := 0 to Keys.Count - 1 do
+      begin
+        if I > 0 then
+          SB.Append(',');
+        SB.Append('"');
+        SB.Append(StringToJSONString(Keys[I]));
+        SB.Append('":');
+        SB.Append(CanonicalSchemaJson(Obj.Elements[Keys[I]]));
+      end;
+      SB.Append('}');
+      Result := SB.ToString;
+    finally
+      SB.Free;
+      Keys.Free;
+    end;
+  end
+  else if AData is TJSONArray then
+  begin
+    Arr := TJSONArray(AData);
+    if Arr.Count = 0 then
+      Exit('[]');
+    SB := TStringBuilder.Create;
+    try
+      SB.Append('[');
+      for I := 0 to Arr.Count - 1 do
+      begin
+        if I > 0 then
+          SB.Append(',');
+        SB.Append(CanonicalSchemaJson(Arr.Items[I]));
+      end;
+      SB.Append(']');
+      Result := SB.ToString;
+    finally
+      SB.Free;
+    end;
+  end
+  else
+    Result := AData.AsJSON;
+end;
+
+function IsDedupCandidateSchema(ANode: TJSONData): Boolean;
+var
+  Obj: TJSONObject;
+  Props: TJSONData;
+begin
+  Result := False;
+  if not (ANode is TJSONObject) then
+    Exit;
+  Obj := TJSONObject(ANode);
+  if Obj.Find('$ref') <> nil then
+    Exit;
+  if not SameText(Obj.Get('type', ''), 'object') then
+    Exit;
+  Props := Obj.Find('properties');
+  if (Props is TJSONObject) and (TJSONObject(Props).Count > 0) then
+    Result := True;
+end;
+
+function SchemaContainsRefTo(ANode: TJSONData; const ATargetRef: string): Boolean;
+var
+  Obj: TJSONObject;
+  Arr: TJSONArray;
+  I: Integer;
+  RefData: TJSONData;
+begin
+  Result := False;
+  if ANode = nil then
+    Exit;
+  if ANode is TJSONObject then
+  begin
+    Obj := TJSONObject(ANode);
+    RefData := Obj.Find('$ref');
+    if (RefData <> nil) and (RefData.JSONType = jtString) and (RefData.AsString = ATargetRef) then
+      Exit(True);
+    for I := 0 to Obj.Count - 1 do
+      if SchemaContainsRefTo(Obj.Items[I], ATargetRef) then
+        Exit(True);
+  end
+  else if ANode is TJSONArray then
+  begin
+    Arr := TJSONArray(ANode);
+    for I := 0 to Arr.Count - 1 do
+      if SchemaContainsRefTo(Arr.Items[I], ATargetRef) then
+        Exit(True);
+  end;
+end;
+
+function ToPascalSchemaToken(const S: string): string;
+var
+  I: Integer;
+  CapNext: Boolean;
+  Ch: Char;
+begin
+  Result := '';
+  CapNext := True;
+  for I := 1 to Length(S) do
+  begin
+    Ch := S[I];
+    if ((Ch >= 'a') and (Ch <= 'z')) or ((Ch >= 'A') and (Ch <= 'Z')) or ((Ch >= '0') and (Ch <= '9')) then
+    begin
+      if CapNext and (Ch >= 'a') and (Ch <= 'z') then
+        Result := Result + UpCase(Ch)
+      else
+        Result := Result + Ch;
+      CapNext := False;
+    end
+    else
+      CapNext := True;
+  end;
+end;
+
+function SuggestSemanticSchemaName(ANode: TJSONObject; const ACtxPath, ACtxRole: string;
+  ASchemasObj: TJSONObject): string;
+var
+  Props, ListProp, ItemsObj: TJSONObject;
+  RefVal, RefName, Suffix, CleanPath, BaseName, Cand: string;
+  I, BraceDepth, Idx: Integer;
+  Ch: Char;
+begin
+  Props := ANode.Find('properties') as TJSONObject;
+  if Props <> nil then
+  begin
+    // Paginated or list envelope wrapping a $ref item
+    for Idx := 0 to 1 do
+    begin
+      if Idx = 0 then
+        ListProp := Props.Find('items') as TJSONObject
+      else
+        ListProp := Props.Find('data') as TJSONObject;
+      if (ListProp <> nil) and SameText(ListProp.Get('type', ''), 'array') then
+      begin
+        ItemsObj := ListProp.Find('items') as TJSONObject;
+        if (ItemsObj <> nil) and (ItemsObj.Find('$ref') <> nil) then
+        begin
+          RefVal := ItemsObj.Get('$ref', '');
+          if RefVal.StartsWith('#/components/schemas/') then
+          begin
+            RefName := Copy(RefVal, Length('#/components/schemas/') + 1, MaxInt);
+            if (Props.Find('total_records') <> nil) or (Props.Find('page_size') <> nil) then
+              Suffix := 'PaginatedResponse'
+            else
+              Suffix := 'ListResponse';
+            Cand := RefName + Suffix;
+            if ASchemasObj.Find(Cand) = nil then
+              Exit(Cand);
+          end;
+        end;
+      end;
+    end;
+
+    // Canonical small shared envelopes
+    if (Props.Count = 2) and (Props.Find('mensagem') <> nil) and (Props.Find('sucesso') <> nil) then
+      if ASchemasObj.Find('MensagemSucessoResponse') = nil then
+        Exit('MensagemSucessoResponse');
+
+    if (Props.Count = 3) and (Props.Find('id') <> nil) and (Props.Find('mensagem') <> nil) and (Props.Find('status') <> nil) then
+      if ASchemasObj.Find('OperacaoStatusResponse') = nil then
+        Exit('OperacaoStatusResponse');
+  end;
+
+  // Replace {param} segments with ById
+  CleanPath := '';
+  BraceDepth := 0;
+  for I := 1 to Length(ACtxPath) do
+  begin
+    Ch := ACtxPath[I];
+    if Ch = '{' then
+    begin
+      if BraceDepth = 0 then
+        CleanPath := CleanPath + '_ById_';
+      Inc(BraceDepth);
+    end
+    else if Ch = '}' then
+    begin
+      if BraceDepth > 0 then
+        Dec(BraceDepth);
+    end
+    else if BraceDepth = 0 then
+      CleanPath := CleanPath + Ch;
+  end;
+
+  BaseName := ToPascalSchemaToken(CleanPath) + ToPascalSchemaToken(ACtxRole);
+  if BaseName.IsEmpty then
+    BaseName := 'SharedSchema';
+  if (BaseName[1] >= '0') and (BaseName[1] <= '9') then
+    BaseName := 'Schema' + BaseName;
+
+  Cand := BaseName;
+  Idx := 2;
+  while ASchemasObj.Find(Cand) <> nil do
+  begin
+    Cand := BaseName + IntToStr(Idx);
+    Inc(Idx);
+  end;
+  Result := Cand;
+end;
+
+function ReplaceKnownSchemasInTree(ANode: TJSONData; ACanonIndex, ANames: TStringList;
+  ASchemasObj: TJSONObject; ASkipRoot: Boolean; const ASelfName: string): TJSONObject;
+const
+  COMBINATORS: array[0..2] of string = ('allOf', 'anyOf', 'oneOf');
+var
+  Obj, PropsObj, Repl: TJSONObject;
+  Arr: TJSONArray;
+  Child: TJSONData;
+  I, CIdx, MapIdx: Integer;
+  PropName, Canon, TargetName, SelfRef: string;
+begin
+  Result := nil;
+  if not (ANode is TJSONObject) then
+    Exit;
+  Obj := TJSONObject(ANode);
+  if Obj.Find('$ref') <> nil then
+    Exit;
+
+  // Bottom-up: process properties
+  Child := Obj.Find('properties');
+  if Child is TJSONObject then
+  begin
+    PropsObj := TJSONObject(Child);
+    for I := 0 to PropsObj.Count - 1 do
+    begin
+      PropName := PropsObj.Names[I];
+      Repl := ReplaceKnownSchemasInTree(PropsObj.Items[I], ACanonIndex, ANames, ASchemasObj, False, ASelfName);
+      if Repl <> nil then
+        PropsObj.Elements[PropName] := Repl;
+    end;
+  end;
+
+  // Bottom-up: process items
+  Child := Obj.Find('items');
+  if Child is TJSONObject then
+  begin
+    Repl := ReplaceKnownSchemasInTree(Child, ACanonIndex, ANames, ASchemasObj, False, ASelfName);
+    if Repl <> nil then
+      Obj.Elements['items'] := Repl;
+  end;
+
+  // Bottom-up: process additionalProperties
+  Child := Obj.Find('additionalProperties');
+  if Child is TJSONObject then
+  begin
+    Repl := ReplaceKnownSchemasInTree(Child, ACanonIndex, ANames, ASchemasObj, False, ASelfName);
+    if Repl <> nil then
+      Obj.Elements['additionalProperties'] := Repl;
+  end;
+
+  // Bottom-up: process allOf / anyOf / oneOf
+  for CIdx := Low(COMBINATORS) to High(COMBINATORS) do
+  begin
+    Child := Obj.Find(COMBINATORS[CIdx]);
+    if Child is TJSONArray then
+    begin
+      Arr := TJSONArray(Child);
+      for I := 0 to Arr.Count - 1 do
+      begin
+        Repl := ReplaceKnownSchemasInTree(Arr.Items[I], ACanonIndex, ANames, ASchemasObj, False, ASelfName);
+        if Repl <> nil then
+          Arr.Items[I] := Repl;
+      end;
+    end;
+  end;
+
+  if (not ASkipRoot) and IsDedupCandidateSchema(Obj) then
+  begin
+    Canon := CanonicalSchemaJson(Obj);
+    if ACanonIndex.Find(Canon, MapIdx) then
+    begin
+      TargetName := ANames[PtrInt(ACanonIndex.Objects[MapIdx])];
+      if TargetName <> ASelfName then
+      begin
+        SelfRef := '#/components/schemas/' + ASelfName;
+        if (ASelfName = '') or (not SchemaContainsRefTo(ASchemasObj.Find(TargetName), SelfRef)) then
+        begin
+          Result := TJSONObject.Create;
+          Result.Add('$ref', '#/components/schemas/' + TargetName);
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure CollectInlineSchemaCounts(ANode: TJSONData; const ACtxPath, ACtxRole: string;
+  ASkipRoot: Boolean; ACountIndex: TStringList; AFirstPaths, AFirstRoles: TStringList;
+  AFirstNodes: TFPList; var ACounts: TIntegerDynArray);
+const
+  COMBINATORS: array[0..2] of string = ('allOf', 'anyOf', 'oneOf');
+var
+  Obj, PropsObj: TJSONObject;
+  Arr: TJSONArray;
+  Child: TJSONData;
+  I, CIdx, MapIdx, Slot: Integer;
+  Canon: string;
+begin
+  if not (ANode is TJSONObject) then
+    Exit;
+  Obj := TJSONObject(ANode);
+  if Obj.Find('$ref') <> nil then
+    Exit;
+
+  Child := Obj.Find('properties');
+  if Child is TJSONObject then
+  begin
+    PropsObj := TJSONObject(Child);
+    for I := 0 to PropsObj.Count - 1 do
+      CollectInlineSchemaCounts(PropsObj.Items[I], ACtxPath + '_' + PropsObj.Names[I], ACtxRole,
+        False, ACountIndex, AFirstPaths, AFirstRoles, AFirstNodes, ACounts);
+  end;
+
+  Child := Obj.Find('items');
+  if Child is TJSONObject then
+    CollectInlineSchemaCounts(Child, ACtxPath, ACtxRole + 'Item',
+      False, ACountIndex, AFirstPaths, AFirstRoles, AFirstNodes, ACounts);
+
+  Child := Obj.Find('additionalProperties');
+  if Child is TJSONObject then
+    CollectInlineSchemaCounts(Child, ACtxPath, ACtxRole + 'Entry',
+      False, ACountIndex, AFirstPaths, AFirstRoles, AFirstNodes, ACounts);
+
+  for CIdx := Low(COMBINATORS) to High(COMBINATORS) do
+  begin
+    Child := Obj.Find(COMBINATORS[CIdx]);
+    if Child is TJSONArray then
+    begin
+      Arr := TJSONArray(Child);
+      for I := 0 to Arr.Count - 1 do
+        CollectInlineSchemaCounts(Arr.Items[I], ACtxPath, ACtxRole,
+          False, ACountIndex, AFirstPaths, AFirstRoles, AFirstNodes, ACounts);
+    end;
+  end;
+
+  if (not ASkipRoot) and IsDedupCandidateSchema(Obj) then
+  begin
+    Canon := CanonicalSchemaJson(Obj);
+    if ACountIndex.Find(Canon, MapIdx) then
+    begin
+      Slot := PtrInt(ACountIndex.Objects[MapIdx]);
+      Inc(ACounts[Slot]);
+    end
+    else
+    begin
+      Slot := Length(ACounts);
+      SetLength(ACounts, Slot + 1);
+      ACounts[Slot] := 1;
+      AFirstPaths.Add(ACtxPath);
+      AFirstRoles.Add(ACtxRole);
+      AFirstNodes.Add(Obj);
+      ACountIndex.AddObject(Canon, TObject(PtrInt(Slot)));
+    end;
+  end;
+end;
+
+procedure DeduplicateOpenAPISchemas(ADoc: TJSONObject);
+const
+  HTTP_METHODS: array[0..6] of string = ('get', 'post', 'put', 'delete', 'patch', 'head', 'options');
+var
+  ComponentsObj, SchemasObj, PathsObj, PathItemObj, OpObj, RbObj, ContentObj, MediaObj,
+  ResponsesObj, RespObj, Repl: TJSONObject;
+  CanonIndex, Names, CountIndex, FirstPaths, FirstRoles: TStringList;
+  FirstNodes: TFPList;
+  Counts: TIntegerDynArray;
+  I, J, K, M, Iter, Promoted, MapIdx, Slot: Integer;
+  SchemaName, PathStr, MethodStr, RespCode, Canon, NewName: string;
+
+  procedure IndexCanonicalName(const ACanon, AName: string);
+  var
+    Idx, NameIdx: Integer;
+  begin
+    if not CanonIndex.Find(ACanon, Idx) then
+    begin
+      NameIdx := Names.Add(AName);
+      CanonIndex.AddObject(ACanon, TObject(PtrInt(NameIdx)));
+    end;
+  end;
+
+  procedure ReplaceAllInPaths;
+  var
+    PI, MI, CI, RI: Integer;
+    PItem, Op, Rb, Cont, Med, Resps, Resp, SchemaRepl: TJSONObject;
+    SchemaNode: TJSONData;
+    MName: string;
+  begin
+    if PathsObj = nil then
+      Exit;
+    for PI := 0 to PathsObj.Count - 1 do
+    begin
+      if not (PathsObj.Items[PI] is TJSONObject) then
+        Continue;
+      PItem := TJSONObject(PathsObj.Items[PI]);
+      for MI := 0 to PItem.Count - 1 do
+      begin
+        MName := LowerCase(PItem.Names[MI]);
+        if (IndexText(MName, HTTP_METHODS) < 0) or not (PItem.Items[MI] is TJSONObject) then
+          Continue;
+        Op := TJSONObject(PItem.Items[MI]);
+
+        Rb := Op.Find('requestBody') as TJSONObject;
+        if Rb <> nil then
+        begin
+          Cont := Rb.Find('content') as TJSONObject;
+          if Cont <> nil then
+            for CI := 0 to Cont.Count - 1 do
+              if Cont.Items[CI] is TJSONObject then
+              begin
+                Med := TJSONObject(Cont.Items[CI]);
+                SchemaNode := Med.Find('schema');
+                if SchemaNode is TJSONObject then
+                begin
+                  SchemaRepl := ReplaceKnownSchemasInTree(SchemaNode, CanonIndex, Names, SchemasObj, False, '');
+                  if SchemaRepl <> nil then
+                    Med.Elements['schema'] := SchemaRepl;
+                end;
+              end;
+        end;
+
+        Resps := Op.Find('responses') as TJSONObject;
+        if Resps <> nil then
+          for RI := 0 to Resps.Count - 1 do
+            if Resps.Items[RI] is TJSONObject then
+            begin
+              Resp := TJSONObject(Resps.Items[RI]);
+              Cont := Resp.Find('content') as TJSONObject;
+              if Cont <> nil then
+                for CI := 0 to Cont.Count - 1 do
+                  if Cont.Items[CI] is TJSONObject then
+                  begin
+                    Med := TJSONObject(Cont.Items[CI]);
+                    SchemaNode := Med.Find('schema');
+                    if SchemaNode is TJSONObject then
+                    begin
+                      SchemaRepl := ReplaceKnownSchemasInTree(SchemaNode, CanonIndex, Names, SchemasObj, False, '');
+                      if SchemaRepl <> nil then
+                        Med.Elements['schema'] := SchemaRepl;
+                    end;
+                  end;
+            end;
+      end;
+    end;
+  end;
+
+begin
+  if ADoc = nil then
+    Exit;
+  PathsObj := ADoc.Find('paths') as TJSONObject;
+  if PathsObj = nil then
+    Exit;
+
+  ComponentsObj := ADoc.Find('components') as TJSONObject;
+  if ComponentsObj = nil then
+  begin
+    ComponentsObj := TJSONObject.Create;
+    ADoc.Add('components', ComponentsObj);
+  end;
+
+  SchemasObj := ComponentsObj.Find('schemas') as TJSONObject;
+  if SchemasObj = nil then
+  begin
+    SchemasObj := TJSONObject.Create;
+    ComponentsObj.Add('schemas', SchemasObj);
+  end;
+
+  CanonIndex := TStringList.Create;
+  Names := TStringList.Create;
+  CountIndex := TStringList.Create;
+  FirstPaths := TStringList.Create;
+  FirstRoles := TStringList.Create;
+  FirstNodes := TFPList.Create;
+  try
+    CanonIndex.CaseSensitive := True;
+    CanonIndex.Sorted := True;
+    CanonIndex.Duplicates := dupIgnore;
+
+    CountIndex.CaseSensitive := True;
+    CountIndex.Sorted := True;
+    CountIndex.Duplicates := dupIgnore;
+
+    // Step 1: Index all explicitly registered components.schemas
+    for I := 0 to SchemasObj.Count - 1 do
+    begin
+      SchemaName := SchemasObj.Names[I];
+      if SchemasObj.Items[I] is TJSONObject then
+        IndexCanonicalName(CanonicalSchemaJson(SchemasObj.Items[I]), SchemaName);
+    end;
+
+    // Step 2: Compact existing components.schemas internally (sub-schemas -> $ref)
+    for I := 0 to SchemasObj.Count - 1 do
+    begin
+      SchemaName := SchemasObj.Names[I];
+      if SchemasObj.Items[I] is TJSONObject then
+      begin
+        ReplaceKnownSchemasInTree(SchemasObj.Items[I], CanonIndex, Names, SchemasObj, True, SchemaName);
+        IndexCanonicalName(CanonicalSchemaJson(SchemasObj.Items[I]), SchemaName);
+      end;
+    end;
+
+    // Step 3: Fixed-point deduplication loop
+    for Iter := 1 to 5 do
+    begin
+      ReplaceAllInPaths;
+      for I := 0 to SchemasObj.Count - 1 do
+      begin
+        SchemaName := SchemasObj.Names[I];
+        if SchemasObj.Items[I] is TJSONObject then
+        begin
+          ReplaceKnownSchemasInTree(SchemasObj.Items[I], CanonIndex, Names, SchemasObj, True, SchemaName);
+          IndexCanonicalName(CanonicalSchemaJson(SchemasObj.Items[I]), SchemaName);
+        end;
+      end;
+
+      // Count remaining inline object schemas
+      CountIndex.Clear;
+      FirstPaths.Clear;
+      FirstRoles.Clear;
+      FirstNodes.Clear;
+      SetLength(Counts, 0);
+
+      for I := 0 to PathsObj.Count - 1 do
+      begin
+        if not (PathsObj.Items[I] is TJSONObject) then
+          Continue;
+        PathStr := PathsObj.Names[I];
+        PathItemObj := TJSONObject(PathsObj.Items[I]);
+        for M := 0 to PathItemObj.Count - 1 do
+        begin
+          MethodStr := LowerCase(PathItemObj.Names[M]);
+          if (IndexText(MethodStr, HTTP_METHODS) < 0) or not (PathItemObj.Items[M] is TJSONObject) then
+            Continue;
+          OpObj := TJSONObject(PathItemObj.Items[M]);
+
+          RbObj := OpObj.Find('requestBody') as TJSONObject;
+          if RbObj <> nil then
+          begin
+            ContentObj := RbObj.Find('content') as TJSONObject;
+            if ContentObj <> nil then
+              for J := 0 to ContentObj.Count - 1 do
+                if ContentObj.Items[J] is TJSONObject then
+                begin
+                  MediaObj := TJSONObject(ContentObj.Items[J]);
+                  CollectInlineSchemaCounts(MediaObj.Find('schema'), PathStr, 'Request',
+                    False, CountIndex, FirstPaths, FirstRoles, FirstNodes, Counts);
+                end;
+          end;
+
+          ResponsesObj := OpObj.Find('responses') as TJSONObject;
+          if ResponsesObj <> nil then
+            for K := 0 to ResponsesObj.Count - 1 do
+              if ResponsesObj.Items[K] is TJSONObject then
+              begin
+                RespCode := ResponsesObj.Names[K];
+                RespObj := TJSONObject(ResponsesObj.Items[K]);
+                ContentObj := RespObj.Find('content') as TJSONObject;
+                if ContentObj <> nil then
+                  for J := 0 to ContentObj.Count - 1 do
+                    if ContentObj.Items[J] is TJSONObject then
+                    begin
+                      MediaObj := TJSONObject(ContentObj.Items[J]);
+                      CollectInlineSchemaCounts(MediaObj.Find('schema'), PathStr, 'Response' + RespCode,
+                        False, CountIndex, FirstPaths, FirstRoles, FirstNodes, Counts);
+                    end;
+              end;
+        end;
+      end;
+
+      for I := 0 to SchemasObj.Count - 1 do
+      begin
+        SchemaName := SchemasObj.Names[I];
+        if SchemasObj.Items[I] is TJSONObject then
+          CollectInlineSchemaCounts(SchemasObj.Items[I], SchemaName, '',
+            True, CountIndex, FirstPaths, FirstRoles, FirstNodes, Counts);
+      end;
+
+      Promoted := 0;
+      for I := 0 to CountIndex.Count - 1 do
+      begin
+        Slot := PtrInt(CountIndex.Objects[I]);
+        if Counts[Slot] >= 2 then
+        begin
+          Canon := CountIndex[I];
+          if not CanonIndex.Find(Canon, MapIdx) then
+          begin
+            NewName := SuggestSemanticSchemaName(
+              TJSONObject(FirstNodes[Slot]), FirstPaths[Slot], FirstRoles[Slot], SchemasObj);
+            SchemasObj.Add(NewName, TJSONObject(FirstNodes[Slot]).Clone);
+            IndexCanonicalName(Canon, NewName);
+            Inc(Promoted);
+          end;
+        end;
+      end;
+
+      if Promoted = 0 then
+        Break;
+    end;
+
+    // Final replacement pass
+    ReplaceAllInPaths;
+    for I := 0 to SchemasObj.Count - 1 do
+    begin
+      SchemaName := SchemasObj.Names[I];
+      if SchemasObj.Items[I] is TJSONObject then
+      begin
+        Repl := ReplaceKnownSchemasInTree(SchemasObj.Items[I], CanonIndex, Names, SchemasObj, True, SchemaName);
+        if Repl <> nil then
+          Repl.Free;
+      end;
+    end;
+  finally
+    FirstNodes.Free;
+    FirstRoles.Free;
+    FirstPaths.Free;
+    CountIndex.Free;
+    Names.Free;
+    CanonIndex.Free;
+  end;
+end;
+
 function TSwaggerRouter.BuildOpenAPISpecification(const ABasePath: string): string;
 var
   I, J, K, RouteIdx: Integer;
@@ -1212,6 +1851,7 @@ begin
       end;
 
       Json.Add('components', Components.ToJson);
+      DeduplicateOpenAPISchemas(Json);
 
       FDocCache := Json.AsJSON;
       FDocCacheBasePath := EffectiveBasePath;
@@ -1673,24 +2313,73 @@ end;
 
 function THTTPDocRoute.JsonResponse: TJSONObject;
 var
-  R: TDocResponse;
+  R, R200Ghost: TDocResponse;
   Item, JsonCont, JsonHeaders, JsonSchema, HObj, HSchema: TJSONObject;
   ContentStr: string;
   I: Integer;
   CItem: TDocContentItem;
   H: TDocResponseHeader;
-  HasAnyContent: Boolean;
+  HasAnyContent, HasOther2xx, RespHasContent: Boolean;
 begin
   Result := TJSONObject.Create;
   try
+    // Detect synthetic empty '200' response created solely by group/router EnableGzip
+    // when the route declares another 2xx status (e.g. 201 Created or 204 No Content).
+    R200Ghost := nil;
+    HasOther2xx := False;
     for R in Responses do
     begin
+      if (Length(R.Code) > 0) and (R.Code[1] = '2') then
+      begin
+        if R.Code <> '200' then
+          HasOther2xx := True
+        else
+        begin
+          RespHasContent := not Trim(R.DocContent.Content).IsEmpty;
+          if not RespHasContent then
+            for I := 0 to R.Contents.Count - 1 do
+              if not Trim(R.Contents[I].Content).IsEmpty then
+              begin
+                RespHasContent := True;
+                Break;
+              end;
+          if (not RespHasContent) and Trim(R.Description).IsEmpty then
+            R200Ghost := R;
+        end;
+      end;
+    end;
+    if not HasOther2xx then
+      R200Ghost := nil;
+
+    for R in Responses do
+    begin
+      if R = R200Ghost then
+        Continue;
+
       Item := TJSONObject.Create;
       try
         Item.Add('description', R.Description);
 
+        // Check if this response has content
+        HasAnyContent := False;
+        if R.Contents.Count > 0 then
+        begin
+          for I := 0 to R.Contents.Count - 1 do
+            if not Trim(R.Contents[I].Content).IsEmpty then
+            begin
+              HasAnyContent := True;
+              Break;
+            end;
+        end
+        else
+          HasAnyContent := not Trim(R.DocContent.Content).IsEmpty;
+
         // Response Headers (RFC 7230, OpenAPI 3.1)
-        if R.Headers.Count > 0 then
+        // Propagate headers from suppressed synthetic 200 ghost (e.g. Content-Encoding: gzip)
+        // to actual 2xx responses that carry a payload.
+        if (R.Headers.Count > 0) or
+           ((R200Ghost <> nil) and (R200Ghost.Headers.Count > 0) and HasAnyContent and
+            (Length(R.Code) > 0) and (R.Code[1] = '2') and (R.Code <> '204')) then
         begin
           JsonHeaders := TJSONObject.Create;
           Item.Add('headers', JsonHeaders);
@@ -1710,21 +2399,34 @@ begin
             if not H.DefaultValue.IsEmpty then
               HSchema.Add('default', H.DefaultValue);
           end;
+          if (R200Ghost <> nil) and HasAnyContent and
+             (Length(R.Code) > 0) and (R.Code[1] = '2') and (R.Code <> '204') then
+          begin
+            for I := 0 to R200Ghost.Headers.Count - 1 do
+            begin
+              H := R200Ghost.Headers[I];
+              if JsonHeaders.Find(H.Name) = nil then
+              begin
+                HObj := TJSONObject.Create;
+                JsonHeaders.Add(H.Name, HObj);
+                if not H.Description.IsEmpty then
+                  HObj.Add('description', H.Description);
+                HSchema := TJSONObject.Create;
+                HObj.Add('schema', HSchema);
+                if not H.HeaderType.IsEmpty then
+                  HSchema.Add('type', H.HeaderType)
+                else
+                  HSchema.Add('type', 'string');
+                if not H.DefaultValue.IsEmpty then
+                  HSchema.Add('default', H.DefaultValue);
+              end;
+            end;
+          end;
         end;
 
         // Content Media Types
         if R.Contents.Count > 0 then
         begin
-          HasAnyContent := False;
-          for I := 0 to R.Contents.Count - 1 do
-          begin
-            if not Trim(R.Contents[I].Content).IsEmpty then
-            begin
-              HasAnyContent := True;
-              Break;
-            end;
-          end;
-
           if HasAnyContent then
           begin
             JsonCont := TJSONObject.Create;
