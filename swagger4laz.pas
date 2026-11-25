@@ -445,6 +445,9 @@ procedure SwaggerUI(AReq: TRequest; AResp: TResponse);
 
 implementation
 
+uses
+  zstream;
+
 var
   GSwaggerLocale: TSwaggerLocale = slEnUS;
 
@@ -1878,9 +1881,68 @@ begin
   AResp.SendContent;
 end;
 
+var
+  GSwaggerUILock: TCriticalSection = nil;
+  GSwaggerUICacheKey: string = '';
+  GSwaggerUIHtml: RawByteString = '';
+  GSwaggerUIGzip: RawByteString = '';
+
+function SwaggerGzipBytes(const ARaw: RawByteString): RawByteString;
+const
+  GZipHeader: array[0..9] of Byte = ($1F, $8B, $08, $00, $00, $00, $00, $00, $00, $FF);
+var
+  OutStream: TMemoryStream;
+  ZipStream: TCompressionStream;
+  CRC, TotalSize: LongWord;
+  Trailer: array[0..1] of LongWord;
+  I, J: Integer;
+  C: LongWord;
+begin
+  Result := '';
+  if Length(ARaw) = 0 then
+    Exit;
+
+  CRC := $FFFFFFFF;
+  for I := 1 to Length(ARaw) do
+  begin
+    C := (CRC xor Byte(ARaw[I])) and $FF;
+    for J := 0 to 7 do
+      if (C and 1) <> 0 then
+        C := $EDB88320 xor (C shr 1)
+      else
+        C := C shr 1;
+    CRC := C xor (CRC shr 8);
+  end;
+  TotalSize := LongWord(Length(ARaw));
+
+  OutStream := TMemoryStream.Create;
+  try
+    OutStream.WriteBuffer(GZipHeader, SizeOf(GZipHeader));
+    ZipStream := TCompressionStream.Create(clDefault, OutStream, True);
+    try
+      ZipStream.WriteBuffer(ARaw[1], Length(ARaw));
+    finally
+      ZipStream.Free;
+    end;
+    Trailer[0] := NtoLE(CRC xor $FFFFFFFF);
+    Trailer[1] := NtoLE(TotalSize);
+    OutStream.WriteBuffer(Trailer, SizeOf(Trailer));
+    SetLength(Result, OutStream.Size);
+    if OutStream.Size > 0 then
+    begin
+      OutStream.Position := 0;
+      OutStream.ReadBuffer(Result[1], OutStream.Size);
+    end;
+  finally
+    OutStream.Free;
+  end;
+end;
+
 procedure SwaggerUI(AReq: TRequest; AResp: TResponse);
 var
-  BasePath, JsonUrl: string;
+  BasePath, JsonUrl, CacheKey, AE: string;
+  HtmlBytes, GzipBytes: RawByteString;
+  Stream: TMemoryStream;
 begin
   BasePath := SwaggerRouter.ResolveBasePath(AReq);
   if SwaggerRouter.FDocRoute = '/' then
@@ -1888,35 +1950,69 @@ begin
   else
     JsonUrl := BasePath + SwaggerRouter.FDocRoute + '/openapi.json';
 
-  AResp.ContentType := 'text/html';
+  CacheKey := SwaggerRouter.Title + #0 + JsonUrl;
+
+  GSwaggerUILock.Enter;
+  try
+    if GSwaggerUICacheKey <> CacheKey then
+    begin
+      GSwaggerUIHtml := RawByteString(
+        '<!DOCTYPE html>' + LineEnding +
+        '<html>' + LineEnding +
+        '<head>' + LineEnding +
+        '  <meta charset="UTF-8">' + LineEnding +
+        '  <title>' + HtmlEscape(SwaggerRouter.Title) + ' - Swagger UI</title>' + LineEnding +
+        '  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">' + LineEnding +
+        '</head>' + LineEnding +
+        '<body>' + LineEnding +
+        '  <div id="swagger-ui"></div>' + LineEnding +
+        '  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>' + LineEnding +
+        '  <script>' + LineEnding +
+        '    window.onload = function() {' + LineEnding +
+        '      const ui = SwaggerUIBundle({' + LineEnding +
+        '        url: ' + JavaScriptString(JsonUrl) + ',' + LineEnding +
+        '        dom_id: "#swagger-ui",' + LineEnding +
+        '        deepLinking: true,' + LineEnding +
+        '        docExpansion: "none",' + LineEnding +
+        '        filter: true,' + LineEnding +
+        '        presets: [' + LineEnding +
+        '          SwaggerUIBundle.presets.apis,' + LineEnding +
+        '          SwaggerUIBundle.SwaggerUIStandalonePreset' + LineEnding +
+        '        ]' + LineEnding +
+        '      });' + LineEnding +
+        '    };' + LineEnding +
+        '  </script>' + LineEnding +
+        '</body>' + LineEnding +
+        '</html>' + LineEnding
+      );
+      GSwaggerUIGzip := SwaggerGzipBytes(GSwaggerUIHtml);
+      GSwaggerUICacheKey := CacheKey;
+    end;
+    HtmlBytes := GSwaggerUIHtml;
+    GzipBytes := GSwaggerUIGzip;
+  finally
+    GSwaggerUILock.Leave;
+  end;
+
+  AResp.ContentType := 'text/html; charset=utf-8';
   AResp.Contents.Clear;
-  AResp.Contents.Add('<!DOCTYPE html>');
-  AResp.Contents.Add('<html>');
-  AResp.Contents.Add('<head>');
-  AResp.Contents.Add('  <meta charset="UTF-8">');
-  AResp.Contents.Add('  <title>' + HtmlEscape(SwaggerRouter.Title) + ' - Swagger UI</title>');
-  AResp.Contents.Add('  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">');
-  AResp.Contents.Add('</head>');
-  AResp.Contents.Add('<body>');
-  AResp.Contents.Add('  <div id="swagger-ui"></div>');
-  AResp.Contents.Add('  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>');
-  AResp.Contents.Add('  <script>');
-  AResp.Contents.Add('    window.onload = function() {');
-  AResp.Contents.Add('      const ui = SwaggerUIBundle({');
-  AResp.Contents.Add('        url: ' + JavaScriptString(JsonUrl) + ',');
-  AResp.Contents.Add('        dom_id: "#swagger-ui",');
-  AResp.Contents.Add('        deepLinking: true,');
-  AResp.Contents.Add('        docExpansion: "none",');
-  AResp.Contents.Add('        filter: true,');
-  AResp.Contents.Add('        presets: [');
-  AResp.Contents.Add('          SwaggerUIBundle.presets.apis,');
-  AResp.Contents.Add('          SwaggerUIBundle.SwaggerUIStandalonePreset');
-  AResp.Contents.Add('        ]');
-  AResp.Contents.Add('      });');
-  AResp.Contents.Add('    };');
-  AResp.Contents.Add('  </script>');
-  AResp.Contents.Add('</body>');
-  AResp.Contents.Add('</html>');
+
+  AE := LowerCase(Trim(AReq.AcceptEncoding));
+  if AE = '' then
+    AE := LowerCase(Trim(AReq.GetCustomHeader('Accept-Encoding')));
+
+  if (Pos('gzip', AE) > 0) and (Length(GzipBytes) > 0) then
+  begin
+    Stream := TMemoryStream.Create;
+    Stream.WriteBuffer(GzipBytes[1], Length(GzipBytes));
+    Stream.Position := 0;
+    AResp.FreeContentStream := True;
+    AResp.ContentStream := Stream;
+    AResp.ContentLength := Stream.Size;
+    AResp.ContentEncoding := 'gzip';
+  end
+  else
+    AResp.Content := string(HtmlBytes);
 end;
 
 { THTTPRouterHelper }
@@ -3913,6 +4009,7 @@ begin
 end;
 
 initialization
+  GSwaggerUILock := TCriticalSection.Create;
   if GetEnvironmentVariable('SWAGGER_LOCALE') <> '' then
     SetSwaggerLocaleByName(GetEnvironmentVariable('SWAGGER_LOCALE'))
   else if GetEnvironmentVariable('ZENITH_LOCALE') <> '' then
@@ -3922,5 +4019,6 @@ initialization
 
 finalization
   SwaggerRouter.Free;
+  FreeAndNil(GSwaggerUILock);
 
 end.

@@ -1,0 +1,11 @@
+*.ppu
+*.o
+*.or
+*.a
+*.res
+*.rsj
+*.compiled
+*.lps
+*.bak
+backup/
+lib/
