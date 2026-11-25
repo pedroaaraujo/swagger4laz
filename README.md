@@ -258,6 +258,9 @@ Swagger4Laz natively registers the `ProblemDetails` schema in `components.schema
 Route.ProducesProblem(400); // Bad Request
 Route.ProducesProblem(404); // Not Found
 
+// Route-specific description (updates the code if a group default already added it)
+Route.ProducesProblem(403, 'User has no access to the Accounts Payable module');
+
 // Register multiple error codes at once
 Route.ProducesProblem([400, 403, 404, 409]);
 

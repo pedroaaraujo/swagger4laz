@@ -258,6 +258,9 @@ El esquema `ProblemDetails` se registra de forma automática en `components.sche
 Route.ProducesProblem(400); // Bad Request
 Route.ProducesProblem(404); // Not Found
 
+// Descripción específica de la ruta (actualiza el código si un valor por defecto del grupo ya lo registró)
+Route.ProducesProblem(403, 'Usuario sin acceso al módulo Cuentas por Pagar');
+
 // Declaración de múltiples códigos de error
 Route.ProducesProblem([400, 403, 404, 409]);
 

@@ -248,6 +248,9 @@ type
 
     { RFC 7807 Problem Details }
     function ProducesProblem(ACode: Integer): THTTPDocRoute; overload;
+    { Same as ProducesProblem(ACode) with a route-specific description. If the code
+      was already registered (e.g. by a group default), only its description is updated. }
+    function ProducesProblem(ACode: Integer; const ADescription: string): THTTPDocRoute; overload;
     function ProducesProblem(const ACodes: array of Integer): THTTPDocRoute; overload;
     function ProducesStandardProblems: THTTPDocRoute;
 
@@ -3013,7 +3016,27 @@ begin
     if SameText(Responses[I].Code, CodeStr) then
       Exit(Self);
 
-  Result := AddResponseRef(ACode, 'ProblemDetails', GetDefaultProblemDescription(ACode), 'application/problem+json');
+  Result := AddResponseRef(ACode, 'ProblemDetails', GetDefaultProblemDescription(ACode), MEDIA_TYPE_PROBLEM_JSON);
+end;
+
+function THTTPDocRoute.ProducesProblem(ACode: Integer; const ADescription: string): THTTPDocRoute;
+var
+  I: Integer;
+  CodeStr, Desc: string;
+begin
+  CodeStr := ACode.ToString;
+  Desc := ADescription;
+  if Desc = '' then
+    Desc := GetDefaultProblemDescription(ACode);
+
+  for I := 0 to Responses.Count - 1 do
+    if SameText(Responses[I].Code, CodeStr) then
+    begin
+      Responses[I].Description := Desc;
+      Exit(Self);
+    end;
+
+  Result := AddResponseRef(ACode, 'ProblemDetails', Desc, MEDIA_TYPE_PROBLEM_JSON);
 end;
 
 function THTTPDocRoute.ProducesProblem(const ACodes: array of Integer): THTTPDocRoute;
